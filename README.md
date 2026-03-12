@@ -1,2 +1,2 @@
-# OFX-Workshop
-A private Repo for building OFX
+# Cube 3D Viewer OFX
+
