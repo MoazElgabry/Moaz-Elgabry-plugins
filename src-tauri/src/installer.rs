@@ -547,6 +547,17 @@ catch {{
         );
     }
 
+    let inner_started = details.contains("Starting Windows plugin install");
+    if !inner_started {
+        let exit_code = status.code();
+        bail!(
+            "Windows installation could not start with administrator privileges. Please accept the Windows admin prompt and try again. Exit code {:?}. Log file: {}. Details: {}",
+            exit_code,
+            log_path.display(),
+            details.trim()
+        );
+    }
+
     bail!(
         "Windows installation failed with exit code {:?}. Log file: {}. Details: {}",
         status.code(),
