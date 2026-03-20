@@ -12,7 +12,7 @@
       "sha256": "b9de9d46b19acb17ef3301e1f8ccfa685dfba14f16da7915f264b99fa631609a",
       "packageType": "zip",
       "bundleName": "ME_OpenDRT.ofx.bundle",
-      "bundleIdentifier": "com.moazelgabry.me-opendrt",
+      "bundleIdentifier": "com.meplugins.ME_OpenDRT",
       "installPath": "/Library/OFX/Plugins",
       "minManagerVersion": "0.1.0",
       "hostProcesses": [
@@ -61,7 +61,7 @@
           "sha256": "25bd795d6434930c5af186a1a095d06fcc1ffbbf97876040e634db10abc4820b",
           "packageType": "zip",
           "bundleName": "ME_OpenDRT.ofx.bundle",
-          "bundleIdentifier": "com.moazelgabry.me-opendrt",
+          "bundleIdentifier": "com.meplugins.ME_OpenDRT",
           "installPath": "/Library/OFX/Plugins",
           "minManagerVersion": "0.1.0",
           "hostProcesses": [
@@ -82,7 +82,7 @@
           "sha256": "65269ab2fcce4f4c5570c43c6d785a750d6eaaf8da1268228ddb0024ed811a05",
           "packageType": "zip",
           "bundleName": "ME_OpenDRT.ofx.bundle",
-          "bundleIdentifier": "com.moazelgabry.me-opendrt",
+          "bundleIdentifier": "com.meplugins.ME_OpenDRT",
           "installPath": "/Library/OFX/Plugins",
           "minManagerVersion": "0.1.0",
           "hostProcesses": [
