@@ -1,0 +1,66 @@
+name: Build Moaz Elgabry Plugins
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "src/**"
+      - "src-tauri/**"
+      - "docs/updates/**"
+      - "index.html"
+      - "package.json"
+      - "package-lock.json"
+      - "vite.config.js"
+      - ".gitignore"
+      - "README.md"
+      - ".github/workflows/build-plugin-manager.yml"
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ""
+          - platform: macos-latest
+            args: ""
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: "package-lock.json"
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+
+      - name: Build and draft release
+        uses: tauri-apps/tauri-action@action-v0.6.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: "."
+          tagName: plugin-manager-v__VERSION__
+          releaseName: Moaz Elgabry Plugins v__VERSION__
+          releaseBody: See the release assets for desktop build artifacts.
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
