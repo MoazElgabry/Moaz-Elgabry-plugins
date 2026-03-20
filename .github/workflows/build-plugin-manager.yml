@@ -28,7 +28,7 @@ jobs:
           - platform: windows-latest
             args: ""
           - platform: macos-latest
-            args: ""
+            args: "--target universal-apple-darwin"
     runs-on: ${{ matrix.platform }}
 
     steps:
@@ -46,6 +46,10 @@ jobs:
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install macOS universal Rust targets
+        if: matrix.platform == 'macos-latest'
+        run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
 
       - name: Cache Rust build
         uses: swatinem/rust-cache@v2
