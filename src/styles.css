@@ -442,6 +442,60 @@ h4 {
   font-size: 0.92rem;
 }
 
+.plugin-progress {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.7rem 0.8rem 0.82rem;
+  border-radius: 16px;
+  border: 1px solid rgba(74, 158, 199, 0.2);
+  background: linear-gradient(180deg, rgba(74, 158, 199, 0.1), rgba(255, 255, 255, 0.02));
+}
+
+.plugin-progress-copy {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.plugin-progress-label {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.plugin-progress-step {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.plugin-progress-bar {
+  position: relative;
+  height: 0.42rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.plugin-progress-fill {
+  position: absolute;
+  inset: 0;
+  width: 42%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(74, 158, 199, 0.15), var(--blue), rgba(212, 176, 31, 0.55));
+  box-shadow: 0 0 18px rgba(74, 158, 199, 0.28);
+  animation: plugin-progress-slide 1.1s ease-in-out infinite;
+}
+
+@keyframes plugin-progress-slide {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(260%);
+  }
+}
+
 .version-drawer {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 18px;

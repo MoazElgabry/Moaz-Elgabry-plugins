@@ -7,7 +7,8 @@ import "./styles.css";
 
 const state = {
   busy: false,
-  dashboard: null
+  dashboard: null,
+  activeOperation: null
 };
 
 const elements = {
@@ -38,6 +39,46 @@ function setBusy(nextBusy) {
   document.querySelectorAll("button").forEach((button) => {
     button.disabled = nextBusy;
   });
+}
+
+function operationSteps(kind) {
+  if (kind === "catalog") {
+    return ["Connecting to catalog", "Loading manifests", "Refreshing plugin status"];
+  }
+  if (kind === "manager-update") {
+    return ["Checking for updates", "Downloading manager update", "Installing manager update"];
+  }
+  return ["Preparing package", "Downloading package", "Installing plugin", "Refreshing plugin status"];
+}
+
+function startOperation(kind, pluginId = null, label = "Working") {
+  const steps = operationSteps(kind);
+  state.activeOperation = {
+    kind,
+    pluginId,
+    label,
+    steps,
+    stepIndex: 0
+  };
+
+  state.activeOperation.timer = window.setInterval(() => {
+    if (!state.activeOperation || state.activeOperation.kind !== kind || state.activeOperation.pluginId !== pluginId) {
+      return;
+    }
+    const lastStep = state.activeOperation.steps.length - 1;
+    state.activeOperation.stepIndex = Math.min(state.activeOperation.stepIndex + 1, lastStep);
+    renderPlugins();
+  }, 1400);
+
+  renderPlugins();
+}
+
+function finishOperation() {
+  if (state.activeOperation?.timer) {
+    window.clearInterval(state.activeOperation.timer);
+  }
+  state.activeOperation = null;
+  renderPlugins();
 }
 
 function parseUiError(error, fallbackSummary = "The operation failed.") {
@@ -150,6 +191,24 @@ function cardToneClass(plugin) {
 
 function primaryActionClass(label) {
   return label === "Reinstall" ? "plugin-secondary-action" : "primary plugin-primary-action";
+}
+
+function pluginOperationMarkup(plugin) {
+  const operation = state.activeOperation;
+  if (!operation || operation.pluginId !== plugin.pluginId) return "";
+
+  const step = operation.steps[operation.stepIndex] ?? operation.label;
+  return `
+    <div class="plugin-progress" role="status" aria-live="polite">
+      <div class="plugin-progress-copy">
+        <p class="plugin-progress-label">${operation.label}</p>
+        <p class="plugin-progress-step">${step}</p>
+      </div>
+      <div class="plugin-progress-bar" aria-hidden="true">
+        <span class="plugin-progress-fill"></span>
+      </div>
+    </div>
+  `;
 }
 
 function pluginIconMarkup(plugin) {
@@ -285,6 +344,7 @@ function renderPlugins() {
         <button class="${primaryActionClass(primaryLabel)}" data-plugin-id="${plugin.pluginId}" data-action="apply">${primaryLabel}</button>
         <p class="action-helper">${primaryLabel === "Update" ? "Latest release ready to install." : "Manager-controlled system-wide OFX install."}</p>
       </div>
+      ${pluginOperationMarkup(plugin)}
     `;
 
     const button = card.querySelector("button");
@@ -310,6 +370,7 @@ function renderDashboard() {
 }
 
 async function refreshDashboard() {
+  startOperation("catalog", null, "Refreshing plugin catalog");
   setBusy(true);
   try {
     hideAlert();
@@ -322,11 +383,17 @@ async function refreshDashboard() {
     logActivity(`Catalog refresh failed: ${parsed.summary}`);
     elements.pluginList.innerHTML = `<div class="empty-state">${parsed.summary}</div>`;
   } finally {
+    finishOperation();
     setBusy(false);
   }
 }
 
 async function applyPluginAction(pluginId, action, targetVersion = null) {
+  const activeLabel =
+    action === "install-selected"
+      ? "Installing selected version"
+      : `${action.replace("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase())} in progress`;
+  startOperation("plugin", pluginId, activeLabel);
   setBusy(true);
   try {
     hideAlert();
@@ -337,6 +404,9 @@ async function applyPluginAction(pluginId, action, targetVersion = null) {
     const parsed = parseUiError(error, `Couldn't complete the ${action.replace("-", " ")} action for ${pluginId}.`);
     showAlert(parsed);
     logActivity(`${pluginId}: ${parsed.summary}`);
+  }
+  finally {
+    finishOperation();
     setBusy(false);
   }
 }
@@ -347,6 +417,7 @@ async function checkForManagerUpdates() {
     return;
   }
 
+  startOperation("manager-update", null, "Updating manager");
   setBusy(true);
   try {
     const update = await check();
@@ -364,6 +435,7 @@ async function checkForManagerUpdates() {
     showAlert(parsed);
     logActivity(`Manager update failed: ${parsed.summary}`);
   } finally {
+    finishOperation();
     setBusy(false);
   }
 }
