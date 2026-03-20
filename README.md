@@ -1,2 +1,2 @@
-# Cube 3D Viewer OFX
+# Moaz Elgabry Plugins
 
