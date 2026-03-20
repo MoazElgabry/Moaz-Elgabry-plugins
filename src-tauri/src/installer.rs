@@ -17,6 +17,12 @@ use tempfile::tempdir;
 use walkdir::WalkDir;
 use zip::ZipArchive;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 pub fn updater_configured() -> bool {
     option_env!("MEPM_UPDATER_PUBKEY").is_some()
 }
@@ -527,8 +533,11 @@ catch {{
         escape_ps(&log_path.display().to_string())
     );
 
-    let status = Command::new("powershell.exe")
-        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &outer_command])
+    let mut command = Command::new("powershell.exe");
+    command.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &outer_command]);
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW);
+    let status = command
         .status()
         .context("Failed to start elevated PowerShell installer")?;
 
