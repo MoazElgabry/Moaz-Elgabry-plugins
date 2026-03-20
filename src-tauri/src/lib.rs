@@ -23,15 +23,14 @@ async fn apply_plugin_action(
 }
 
 pub fn run() {
-    let mut builder = tauri::Builder::default().plugin(tauri_plugin_process::init());
-
-    if let Some(pubkey) = option_env!("MEPM_UPDATER_PUBKEY") {
-        builder = builder.plugin(
-            tauri_plugin_updater::Builder::new()
-                .pubkey(pubkey)
-                .build(),
-        );
-    }
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_process::init())
+        .plugin({
+            let updater = tauri_plugin_updater::Builder::new();
+            #[cfg(target_os = "macos")]
+            let updater = updater.target("darwin-universal");
+            updater.build()
+        });
 
     builder
         .invoke_handler(tauri::generate_handler![dashboard_state, apply_plugin_action])

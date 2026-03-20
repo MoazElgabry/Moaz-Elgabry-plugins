@@ -420,7 +420,11 @@ async function checkForManagerUpdates() {
   startOperation("manager-update", null, "Updating manager");
   setBusy(true);
   try {
-    const update = await check();
+    const update = await check(
+      state.dashboard?.manager?.platform === "macos"
+        ? { target: "darwin-universal" }
+        : undefined
+    );
     if (!update) {
       logActivity("Manager app is already up to date.");
       return;

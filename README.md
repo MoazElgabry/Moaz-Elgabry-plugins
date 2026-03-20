@@ -66,9 +66,18 @@ Outside the debug local-dev path, the app uses that hosted Pages catalog.
 
 ## Updater Configuration
 
-Manager self-update is intentionally disabled in the committed CI/build config until signing keys and the hosted updater endpoint are ready.
+Manager self-update is now wired for signed release artifacts through GitHub Releases and a static updater feed hosted on GitHub Pages.
 
-The app can still surface updater status in the UI, but release builds do not currently generate updater artifacts.
+Before the first real self-update release, add these repository secrets:
+
+- `TAURI_SIGNING_PRIVATE_KEY`
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+
+The updater feed is published at:
+
+- `https://moazelgabry.github.io/Moaz-Elgabry-plugins/updates/latest.json`
+
+The Pages workflow regenerates that file from the latest published manager release.
 
 ## Plugin Manifests
 

@@ -26,7 +26,7 @@ use std::os::windows::process::CommandExt;
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 pub fn updater_configured() -> bool {
-    option_env!("MEPM_UPDATER_PUBKEY").is_some()
+    true
 }
 
 pub fn current_platform() -> &'static str {
