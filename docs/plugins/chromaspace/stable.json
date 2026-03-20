@@ -1,15 +1,15 @@
 {
   "pluginId": "chromaspace",
   "displayName": "Chromaspace",
-  "version": "0.0.0-dev",
-  "releaseDate": "2026-03-17T00:00:00Z",
-  "releaseNotesUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/release-notes/chromaspace-0.0.0-dev.html",
+  "version": "1.0.0b",
+  "releaseDate": "2026-03-20T00:00:00Z",
+  "releaseNotesUrl": "https://github.com/MoazElgabry/Chromaspace/releases/tag/v1.0.0b",
   "platforms": [
     {
       "platform": "macos",
       "arch": "universal",
-      "downloadUrl": "https://github.com/MoazElgabry/OFX-Workshop/releases/download/chromaspace-v0.0.0-dev/Chromaspace-macos-universal.zip",
-      "sha256": "REPLACE_WITH_REAL_SHA256",
+      "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/v1.0.0b/Chromaspace_v1.0.0b_macOS_universal_portable.zip",
+      "sha256": "5fe3b06da616cc4e6f7dc4078f1eb135e818606ab4cafdc8e95ffef7ac0a17ef",
       "packageType": "zip",
       "bundleName": "Chromaspace.ofx.bundle",
       "bundleIdentifier": "com.moazelgabry.chromaspace",
@@ -29,8 +29,8 @@
     {
       "platform": "windows",
       "arch": "x86_64",
-      "downloadUrl": "https://github.com/MoazElgabry/OFX-Workshop/releases/download/chromaspace-v0.0.0-dev/Chromaspace-windows-x86_64.zip",
-      "sha256": "REPLACE_WITH_REAL_SHA256",
+      "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/v1.0.0b/Chromaspace_v1.0.0b_Windows_portable.zip",
+      "sha256": "20e5aeeab2314620ca7f9350992bba9f564b027cf0d365c9f2a266212edae0b9",
       "packageType": "zip",
       "bundleName": "Chromaspace.ofx.bundle",
       "bundleIdentifier": "com.moazelgabry.chromaspace",
