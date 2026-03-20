@@ -39,6 +39,7 @@
     ],
     "targets": [
       "app",
+      "appimage",
       "dmg",
       "nsis"
     ],

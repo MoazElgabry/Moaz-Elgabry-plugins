@@ -6,6 +6,27 @@
   "releaseNotesUrl": "https://github.com/MoazElgabry/ME_OpenDRT-OFX/releases/tag/v1.2.11",
   "platforms": [
     {
+      "platform": "linux",
+      "arch": "x86_64",
+      "downloadUrl": "https://github.com/MoazElgabry/ME_OpenDRT-OFX/releases/download/v1.2.11/ME_OpenDRT_v1.2.11_linux_x86_64_cuda_opencl_portable.tar.gz",
+      "sha256": "88a8452a404b53a49360dfc275afe2f92a19f467fe75a7eecac86a553bacdaec",
+      "packageType": "tar.gz",
+      "bundleName": "ME_OpenDRT.ofx.bundle",
+      "bundleIdentifier": "com.moazelgabry.me-opendrt",
+      "installPath": "/usr/OFX/Plugins",
+      "minManagerVersion": "0.1.0",
+      "hostProcesses": [
+        "Resolve",
+        "DaVinci Resolve",
+        "Fusion",
+        "Fusion Studio",
+        "Nuke",
+        "NukeX",
+        "NukeStudio",
+        "Hiero"
+      ]
+    },
+    {
       "platform": "macos",
       "arch": "universal",
       "downloadUrl": "https://github.com/MoazElgabry/ME_OpenDRT-OFX/releases/download/v1.2.11/ME_OpenDRT_v1.2.11_macOS_universal_portable.zip",

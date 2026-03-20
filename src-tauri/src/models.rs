@@ -235,6 +235,20 @@ fn classify_error<'a>(operation: &'a str, message: &'a str, details: &'a str) ->
         );
     }
 
+    if details.contains("pkexec executable was not found") {
+        return (
+            "linux_pkexec_missing",
+            "Linux admin authorization is not available. Install or enable PolicyKit and pkexec, then try again.",
+        );
+    }
+
+    if details.contains("Linux bundle did not contain") || details.contains("Archive did not contain an .ofx.bundle") {
+        return (
+            "linux_package_layout_invalid",
+            "The Linux plugin package layout was not recognized.",
+        );
+    }
+
     if details.contains("cancelled or failed") {
         return (
             "install_failed",

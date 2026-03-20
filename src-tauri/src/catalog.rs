@@ -355,7 +355,7 @@ fn resolve_manifest_path(raw: &str, manager_root: &Path) -> Result<PathBuf> {
         return Ok(local_path);
     }
 
-    Ok(manager_root.join(expanded.replace('/', "\\")))
+    Ok(manager_root.join(normalize_path_text(&expanded)))
 }
 
 fn resolve_local_path(raw: &str) -> Option<PathBuf> {
@@ -363,10 +363,37 @@ fn resolve_local_path(raw: &str) -> Option<PathBuf> {
         return None;
     }
     if let Some(stripped) = raw.strip_prefix("file:///") {
-        return Some(PathBuf::from(stripped.replace('/', "\\")));
+        return Some(PathBuf::from(normalize_file_uri_path(stripped)));
     }
-    if raw.contains(':') || raw.starts_with('\\') || raw.starts_with('/') {
-        return Some(PathBuf::from(raw));
+    if raw.starts_with('/') || raw.starts_with('\\') {
+        return Some(PathBuf::from(normalize_path_text(raw)));
+    }
+    if cfg!(windows) && raw.contains(':') {
+        return Some(PathBuf::from(normalize_path_text(raw)));
     }
     None
+}
+
+fn normalize_file_uri_path(raw: &str) -> String {
+    #[cfg(target_os = "windows")]
+    {
+        raw.replace('/', "\\")
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        raw.to_string()
+    }
+}
+
+fn normalize_path_text(raw: &str) -> String {
+    #[cfg(target_os = "windows")]
+    {
+        raw.replace('/', "\\")
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        raw.replace('\\', "/")
+    }
 }

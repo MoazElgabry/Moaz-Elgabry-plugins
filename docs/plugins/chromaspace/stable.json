@@ -6,6 +6,27 @@
   "releaseNotesUrl": "https://github.com/MoazElgabry/Chromaspace/releases/tag/v1.0.0b",
   "platforms": [
     {
+      "platform": "linux",
+      "arch": "x86_64",
+      "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/v1.0.0b/Chromaspace_v1.0.0b_linux_portable.tar.gz",
+      "sha256": "f0a7524afccd2d56e36a0d671ac52222113e3853a0ab35c58f8e7bfb6613c8bd",
+      "packageType": "tar.gz",
+      "bundleName": "Chromaspace.ofx.bundle",
+      "bundleIdentifier": "com.moazelgabry.Chromaspace",
+      "installPath": "/usr/OFX/Plugins",
+      "minManagerVersion": "0.1.0",
+      "hostProcesses": [
+        "Resolve",
+        "DaVinci Resolve",
+        "Fusion",
+        "Fusion Studio",
+        "Nuke",
+        "NukeX",
+        "NukeStudio",
+        "Hiero"
+      ]
+    },
+    {
       "platform": "macos",
       "arch": "universal",
       "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/v1.0.0b/Chromaspace_v1.0.0b_macOS_universal_portable.zip",

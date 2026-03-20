@@ -4,6 +4,7 @@ use crate::models::{
 };
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::Utc;
+use flate2::read::GzDecoder;
 use fs_extra::dir::{copy as copy_dir, CopyOptions};
 use plist::Value as PlistValue;
 use reqwest::Client;
@@ -13,6 +14,7 @@ use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use sysinfo::System;
+use tar::Archive;
 use tempfile::tempdir;
 use walkdir::WalkDir;
 use zip::ZipArchive;
@@ -32,6 +34,8 @@ pub fn current_platform() -> &'static str {
         "windows"
     } else if cfg!(target_os = "macos") {
         "macos"
+    } else if cfg!(target_os = "linux") {
+        "linux"
     } else {
         "unsupported"
     }
@@ -148,7 +152,11 @@ pub async fn apply_plugin_action(
         verify_archive_hash(&bytes, &resolved.package.sha256)?;
 
         let extracted_root = staging_root.path().join("extract");
-        extract_zip(&bytes, &extracted_root)?;
+        if resolved.package.package_type == "tar.gz" {
+            extract_tar_gz(&bytes, &extracted_root)?;
+        } else {
+            extract_zip(&bytes, &extracted_root)?;
+        }
 
         let extracted_bundle = find_bundle_root(&extracted_root)?
             .ok_or_else(|| anyhow!("Archive did not contain an .ofx.bundle"))?;
@@ -187,8 +195,15 @@ pub async fn apply_plugin_action(
             &resolved.package.bundle_name,
             source_spec.simulate_fail_after_backup,
         )?;
+    } else if cfg!(target_os = "linux") {
+        privileged_install_linux(
+            &bundle_root,
+            &install_root,
+            &resolved.package.bundle_name,
+            source_spec.simulate_fail_after_backup,
+        )?;
     } else {
-        bail!("Only macOS and Windows are supported in v1");
+        bail!("Only macOS, Windows, and Linux are supported in v1");
     }
 
     let target_bundle = install_root.join(&resolved.package.bundle_name);
@@ -239,10 +254,10 @@ fn parse_package_source_spec(raw: &str) -> PackageSourceSpec {
 }
 
 fn ensure_supported_package(package: &PlatformPackage) -> Result<()> {
-    if package.package_type != "zip" && package.package_type != "bundle-dir" {
-        bail!("Only zip and bundle-dir plugin packages are supported in v1");
+    if package.package_type != "zip" && package.package_type != "bundle-dir" && package.package_type != "tar.gz" {
+        bail!("Only zip, tar.gz, and bundle-dir plugin packages are supported in v1");
     }
-    if package.package_type == "zip" && package.sha256.starts_with("REPLACE_") {
+    if (package.package_type == "zip" || package.package_type == "tar.gz") && package.sha256.starts_with("REPLACE_") {
         bail!("The manifest for this plugin still contains a placeholder checksum.");
     }
     Ok(())
@@ -377,6 +392,24 @@ fn extract_zip(bytes: &[u8], destination: &Path) -> Result<()> {
     Ok(())
 }
 
+fn extract_tar_gz(bytes: &[u8], destination: &Path) -> Result<()> {
+    fs::create_dir_all(destination)
+        .with_context(|| format!("Failed to create {}", destination.display()))?;
+
+    let reader = Cursor::new(bytes);
+    let decoder = GzDecoder::new(reader);
+    let mut archive = Archive::new(decoder);
+
+    for entry in archive.entries().context("Downloaded archive was not a valid tar.gz")? {
+        let mut entry = entry?;
+        entry
+            .unpack_in(destination)
+            .with_context(|| format!("Failed to extract archive entry into {}", destination.display()))?;
+    }
+
+    Ok(())
+}
+
 fn find_bundle_root(root: &Path) -> Result<Option<PathBuf>> {
     for entry in WalkDir::new(root).min_depth(1).max_depth(6) {
         let entry = entry?;
@@ -425,6 +458,16 @@ fn verify_bundle(bundle_root: &Path, package: &PlatformPackage) -> Result<()> {
                 win64_binary.display()
             );
         }
+        if package.platform == "linux" {
+            let linux_binary = linux_bundle_binary_path(bundle_root, package)?;
+            if linux_binary.exists() {
+                return Ok(());
+            }
+            bail!(
+                "Linux bundle did not contain {}",
+                linux_binary.display()
+            );
+        }
         bail!("Bundle did not contain Contents/Info.plist");
     }
     let plist = PlistValue::from_file(&plist_path)
@@ -447,6 +490,25 @@ fn verify_bundle(bundle_root: &Path, package: &PlatformPackage) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn linux_bundle_binary_path(bundle_root: &Path, package: &PlatformPackage) -> Result<PathBuf> {
+    let binary_name = package
+        .bundle_name
+        .strip_suffix(".ofx.bundle")
+        .unwrap_or(&package.bundle_name);
+    Ok(bundle_root
+        .join("Contents")
+        .join(linux_arch_dir())
+        .join(format!("{binary_name}.ofx")))
+}
+
+fn linux_arch_dir() -> &'static str {
+    match current_arch() {
+        "x86_64" => "Linux-x86-64",
+        "aarch64" => "Linux-aarch64",
+        _ => "Linux-x86-64",
+    }
 }
 
 fn privileged_install_windows(
@@ -662,6 +724,143 @@ trap - EXIT
     bail!("macOS installation was cancelled or failed with exit code {:?}", status.code())
 }
 
+fn privileged_install_linux(
+    source_bundle: &Path,
+    install_root: &Path,
+    bundle_name: &str,
+    simulate_fail_after_backup: bool,
+) -> Result<()> {
+    let pkexec = find_linux_pkexec()
+        .ok_or_else(|| anyhow!("pkexec executable was not found. A PolicyKit-capable environment is required."))?;
+    let script_dir = tempdir().context("Failed to create temp directory for Linux installer script")?;
+    let script_path = script_dir.path().join("install-plugin.sh");
+    let log_path = std::env::temp_dir()
+        .join("Moaz Elgabry Plugins")
+        .join(format!(
+            "install-plugin-{}-{}.log",
+            std::process::id(),
+            Utc::now().timestamp_millis()
+        ));
+    if let Some(parent) = log_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create {}", parent.display()))?;
+    }
+    let script = format!(
+        r#"#!/bin/sh
+set -eu
+
+SOURCE_BUNDLE="$1"
+INSTALL_ROOT="$2"
+BUNDLE_NAME="$3"
+LOG_PATH="$4"
+SIMULATE_FAIL="$5"
+TARGET="$INSTALL_ROOT/$BUNDLE_NAME"
+BACKUP="$INSTALL_ROOT/$BUNDLE_NAME.manager-backup"
+
+write_log() {{
+  printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "$LOG_PATH"
+}}
+
+cleanup_on_error() {{
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    write_log "ERROR: install failed with exit code $status"
+    rm -rf "$TARGET"
+    if [ -d "$BACKUP" ]; then
+      mv "$BACKUP" "$TARGET"
+      write_log "Restored previous bundle from backup"
+    fi
+  fi
+  exit "$status"
+}}
+
+trap cleanup_on_error EXIT
+: > "$LOG_PATH"
+write_log "Starting Linux plugin install"
+write_log "SourceBundle=$SOURCE_BUNDLE"
+write_log "InstallRoot=$INSTALL_ROOT"
+write_log "BundleName=$BUNDLE_NAME"
+
+mkdir -p "$INSTALL_ROOT"
+rm -rf "$BACKUP"
+if [ -d "$TARGET" ]; then
+  write_log "Moving existing bundle to backup"
+  mv "$TARGET" "$BACKUP"
+fi
+if [ "$SIMULATE_FAIL" = "1" ]; then
+  write_log "Simulating failure after backup for rollback test"
+  exit 91
+fi
+write_log "Copying new bundle"
+cp -R "$SOURCE_BUNDLE" "$INSTALL_ROOT/"
+chmod -R 755 "$TARGET"
+chown -R root:root "$TARGET"
+rm -rf "$BACKUP"
+write_log "Install completed successfully"
+trap - EXIT
+"#,
+    );
+    fs::write(&script_path, script)
+        .with_context(|| format!("Failed to write {}", script_path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(&script_path)?.permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script_path, permissions)?;
+    }
+
+    let status = Command::new(pkexec)
+        .arg(&script_path)
+        .arg(source_bundle)
+        .arg(install_root)
+        .arg(bundle_name)
+        .arg(&log_path)
+        .arg(if simulate_fail_after_backup { "1" } else { "0" })
+        .status()
+        .context("Failed to start elevated Linux installer")?;
+
+    if status.success() {
+        let _ = fs::remove_file(&log_path);
+        return Ok(());
+    }
+
+    let details = fs::read_to_string(&log_path).unwrap_or_default();
+    if details.trim().is_empty() {
+        bail!(
+            "Linux installation was cancelled or failed with exit code {:?}. Log file: {}",
+            status.code(),
+            log_path.display()
+        );
+    }
+
+    bail!(
+        "Linux installation failed with exit code {:?}. Log file: {}. Details: {}",
+        status.code(),
+        log_path.display(),
+        details.trim()
+    )
+}
+
+fn find_linux_pkexec() -> Option<PathBuf> {
+    if !cfg!(target_os = "linux") {
+        return None;
+    }
+
+    let candidates = [
+        "/usr/bin/pkexec",
+        "/bin/pkexec",
+        "/usr/local/bin/pkexec",
+    ];
+    for candidate in candidates {
+        let path = PathBuf::from(candidate);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+    None
+}
+
 fn escape_ps(raw: &str) -> String {
     raw.replace('\'', "''")
 }
@@ -686,9 +885,9 @@ fn legacy_bundle_stamp_path(bundle_root: &Path) -> PathBuf {
 
 fn resolve_local_source_path(raw: &str) -> Result<PathBuf> {
     let path = if let Some(stripped) = raw.strip_prefix("file:///") {
-        PathBuf::from(stripped.replace('/', "\\"))
+        normalize_file_uri_path(stripped)
     } else {
-        PathBuf::from(raw)
+        normalize_runtime_path(raw)
     };
 
     if path.exists() {
@@ -696,4 +895,20 @@ fn resolve_local_source_path(raw: &str) -> Result<PathBuf> {
     }
 
     bail!("Local package source was not found at {}", path.display())
+}
+
+fn normalize_file_uri_path(raw: &str) -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(raw.replace('/', "\\"))
+    } else {
+        PathBuf::from(format!("/{}", raw.trim_start_matches('/')))
+    }
+}
+
+fn normalize_runtime_path(raw: &str) -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(raw.replace('/', "\\"))
+    } else {
+        PathBuf::from(raw)
+    }
 }
