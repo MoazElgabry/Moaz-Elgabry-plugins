@@ -517,10 +517,11 @@ catch {{
         .with_context(|| format!("Failed to write {}", script_path.display()))?;
 
     let outer_command = format!(
-        "$ErrorActionPreference='Stop'; Set-Content -Path '{}' -Value ''; Add-Content -Path '{}' -Value '[outer] launching elevated installer'; try {{ $p = Start-Process -FilePath 'powershell.exe' -Verb RunAs -Wait -PassThru -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','{}'); Add-Content -Path '{}' -Value ('[outer] elevated installer exit code: ' + $p.ExitCode); exit $p.ExitCode }} catch {{ Add-Content -Path '{}' -Value ('[outer] ERROR: ' + $_.Exception.Message); if ($_.ScriptStackTrace) {{ Add-Content -Path '{}' -Value ('[outer] STACK: ' + $_.ScriptStackTrace) }} exit 1 }}",
+        "$ErrorActionPreference='Stop'; Set-Content -Path '{}' -Value ''; Add-Content -Path '{}' -Value '[outer] launching elevated installer'; try {{ $ps = Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'; $argList = '-NoProfile -ExecutionPolicy Bypass -File \"{}\"'; Add-Content -Path '{}' -Value ('[outer] command: ' + $ps + ' ' + $argList); $p = Start-Process -FilePath $ps -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ArgumentList $argList; Add-Content -Path '{}' -Value ('[outer] elevated installer exit code: ' + $p.ExitCode); exit $p.ExitCode }} catch {{ Add-Content -Path '{}' -Value ('[outer] ERROR: ' + $_.Exception.Message); if ($_.ScriptStackTrace) {{ Add-Content -Path '{}' -Value ('[outer] STACK: ' + $_.ScriptStackTrace) }} exit 1 }}",
         escape_ps(&log_path.display().to_string()),
         escape_ps(&log_path.display().to_string()),
         escape_ps(&script_path.display().to_string()),
+        escape_ps(&log_path.display().to_string()),
         escape_ps(&log_path.display().to_string()),
         escape_ps(&log_path.display().to_string()),
         escape_ps(&log_path.display().to_string())
