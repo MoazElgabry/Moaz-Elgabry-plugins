@@ -12,7 +12,7 @@
       "sha256": "5fe3b06da616cc4e6f7dc4078f1eb135e818606ab4cafdc8e95ffef7ac0a17ef",
       "packageType": "zip",
       "bundleName": "Chromaspace.ofx.bundle",
-      "bundleIdentifier": "com.moazelgabry.chromaspace",
+      "bundleIdentifier": "com.moazelgabry.Chromaspace",
       "installPath": "/Library/OFX/Plugins",
       "minManagerVersion": "0.1.0",
       "hostProcesses": [
@@ -33,7 +33,7 @@
       "sha256": "20e5aeeab2314620ca7f9350992bba9f564b027cf0d365c9f2a266212edae0b9",
       "packageType": "zip",
       "bundleName": "Chromaspace.ofx.bundle",
-      "bundleIdentifier": "com.moazelgabry.chromaspace",
+      "bundleIdentifier": "com.moazelgabry.Chromaspace",
       "installPath": "C:\\Program Files\\Common Files\\OFX\\Plugins",
       "minManagerVersion": "0.1.0",
       "hostProcesses": [
