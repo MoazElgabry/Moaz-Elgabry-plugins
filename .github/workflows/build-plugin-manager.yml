@@ -76,10 +76,15 @@ jobs:
           gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)"
 
           $tagRef = "repos/$env:GITHUB_REPOSITORY/git/refs/tags/$tag"
-          gh api --method DELETE $tagRef 2>$null
-          if ($LASTEXITCODE -ne 0) {
+          $existingTagRef = $null
+          $PSNativeCommandUseErrorActionPreference = $false
+          $existingTagRef = gh api $tagRef 2>$null
+          if ($LASTEXITCODE -eq 0 -and $existingTagRef) {
+            gh api --method DELETE $tagRef
+          } else {
             Write-Host "No stale git tag ref to delete for $tag"
           }
+          $global:LASTEXITCODE = 0
           "should_build=true" >> $env:GITHUB_OUTPUT
 
   build:
