@@ -61,15 +61,15 @@ jobs:
             $releaseUrl = if ($release.html_url) { $release.html_url } else { "https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$tag" }
             $assetCount = @($release.assets).Count
             "should_build=false" >> $env:GITHUB_OUTPUT
-            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Release guard blocked the build because GitHub already reports a published release for $tag."
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Release build skipped because $tag is already published."
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Release URL: $releaseUrl"
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Release ID: $($release.id)"
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Draft: $($release.draft)"
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Prerelease: $($release.prerelease)"
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Assets found: $assetCount"
-            Write-Error "GitHub reports that $tag is already published. Inspect $releaseUrl or bump the version before building again."
-            exit 1
+            Write-Host "Published release already exists for $tag. Skipping build."
+            exit 0
           }
 
           Write-Host "Deleting stale draft release $tag (id=$($release.id))"
