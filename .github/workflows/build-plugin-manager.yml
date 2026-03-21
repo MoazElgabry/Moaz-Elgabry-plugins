@@ -21,7 +21,55 @@ on:
       - ".github/workflows/build-plugin-manager.yml"
 
 jobs:
+  prepare_release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      app_version: ${{ steps.version.outputs.app_version }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+
+      - name: Resolve app version
+        id: version
+        run: |
+          echo "app_version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Remove stale draft release for this version
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APP_VERSION: ${{ steps.version.outputs.app_version }}
+        run: |
+          $tag = "plugin-manager-v$env:APP_VERSION"
+          $releaseJson = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" 2>$null
+          if (-not $releaseJson) {
+            Write-Host "No existing release found for $tag"
+            exit 0
+          }
+
+          $release = $releaseJson | ConvertFrom-Json
+          if (-not $release.draft) {
+            Write-Error "A published release already exists for $tag. Bump the version before building again."
+            exit 1
+          }
+
+          Write-Host "Deleting stale draft release $tag (id=$($release.id))"
+          gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)"
+
+          $tagRef = "repos/$env:GITHUB_REPOSITORY/git/refs/tags/$tag"
+          gh api --method DELETE $tagRef 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "No stale git tag ref to delete for $tag"
+          }
+
   build:
+    needs: prepare_release
     permissions:
       contents: write
     strategy:
