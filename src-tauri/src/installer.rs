@@ -438,16 +438,52 @@ fn extract_zip(bytes: &[u8], destination: &Path) -> Result<()> {
             Some(path) => path.to_path_buf(),
             None => continue,
         };
+        if should_skip_zip_entry(&relative) {
+            continue;
+        }
+        validate_zip_entry_path(&relative)
+            .with_context(|| format!("Archive entry '{}' could not be extracted safely", file.name()))?;
         let output = destination.join(relative);
         if file.name().ends_with('/') {
-            fs::create_dir_all(&output)?;
+            fs::create_dir_all(&output)
+                .with_context(|| format!("Failed to create extracted directory {}", output.display()))?;
             continue;
         }
         if let Some(parent) = output.parent() {
-            fs::create_dir_all(parent)?;
+            fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create parent directory {}", parent.display()))?;
         }
-        let mut writer = fs::File::create(&output)?;
-        std::io::copy(&mut file, &mut writer)?;
+        let mut writer = fs::File::create(&output)
+            .with_context(|| format!("Failed to create extracted file {}", output.display()))?;
+        std::io::copy(&mut file, &mut writer)
+            .with_context(|| format!("Failed to write extracted file {}", output.display()))?;
+    }
+
+    Ok(())
+}
+
+fn should_skip_zip_entry(path: &Path) -> bool {
+    path.components().any(|component| {
+        let name = component.as_os_str().to_string_lossy();
+        name == "__MACOSX" || name.starts_with("._")
+    })
+}
+
+fn validate_zip_entry_path(path: &Path) -> Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        for component in path.components() {
+            let name = component.as_os_str().to_string_lossy();
+            if name.is_empty() {
+                continue;
+            }
+            if name.ends_with(' ') || name.ends_with('.') {
+                bail!("Windows archive entry component '{}' ends with an invalid character", name);
+            }
+            if name.chars().any(|ch| matches!(ch, '<' | '>' | ':' | '"' | '|' | '?' | '*')) {
+                bail!("Windows archive entry component '{}' contains characters invalid on Windows", name);
+            }
+        }
     }
 
     Ok(())
