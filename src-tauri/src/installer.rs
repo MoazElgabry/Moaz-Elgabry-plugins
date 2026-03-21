@@ -444,7 +444,7 @@ fn extract_zip(bytes: &[u8], destination: &Path) -> Result<()> {
         validate_zip_entry_path(&relative)
             .with_context(|| format!("Archive entry '{}' could not be extracted safely", file.name()))?;
         let output = destination.join(relative);
-        if file.name().ends_with('/') {
+        if zip_entry_is_dir(&file) {
             fs::create_dir_all(&output)
                 .with_context(|| format!("Failed to create extracted directory {}", output.display()))?;
             continue;
@@ -460,6 +460,10 @@ fn extract_zip(bytes: &[u8], destination: &Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn zip_entry_is_dir(file: &zip::read::ZipFile<'_>) -> bool {
+    file.is_dir() || file.name().ends_with('/') || file.name().ends_with('\\')
 }
 
 fn should_skip_zip_entry(path: &Path) -> bool {

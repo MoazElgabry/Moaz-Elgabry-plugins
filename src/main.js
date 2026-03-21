@@ -87,6 +87,18 @@ function finishOperation() {
 function parseUiError(error, fallbackSummary = "The operation failed.") {
   const raw = typeof error === "string" ? error : String(error);
 
+  if (
+    raw.includes("fallback platforms") &&
+    raw.includes("response `platforms` object")
+  ) {
+    return {
+      summary: "Update is still being published. Try again in a minute.",
+      details:
+        "The new manager release is available, but the update feed has not finished refreshing yet. Wait a moment and check again.",
+      code: "updater_feed_pending"
+    };
+  }
+
   try {
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed.summary === "string") {
