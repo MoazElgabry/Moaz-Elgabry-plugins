@@ -49,14 +49,14 @@ jobs:
           APP_VERSION: ${{ steps.version.outputs.app_version }}
         run: |
           $tag = "plugin-manager-v$env:APP_VERSION"
-          $releaseJson = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" 2>$null
-          if (-not $releaseJson) {
+          $releasesJson = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100"
+          $releases = $releasesJson | ConvertFrom-Json
+          $release = $releases | Where-Object { $_.tag_name -eq $tag } | Select-Object -First 1
+          if (-not $release) {
             Write-Host "No existing release found for $tag"
             "should_build=true" >> $env:GITHUB_OUTPUT
             exit 0
           }
-
-          $release = $releaseJson | ConvertFrom-Json
           if (-not $release.draft) {
             $releaseUrl = if ($release.html_url) { $release.html_url } else { "https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$tag" }
             $assetCount = @($release.assets).Count
