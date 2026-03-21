@@ -228,6 +228,10 @@ h4 {
   margin-bottom: 0.95rem;
 }
 
+.manager-summary-grid {
+  margin-bottom: 0.8rem;
+}
+
 .summary-grid dt {
   color: rgba(255, 255, 255, 0.62);
   font-size: 0.75rem;
@@ -244,6 +248,32 @@ h4 {
 .button-row {
   display: grid;
   gap: 0.72rem;
+}
+
+.manager-details {
+  margin-top: 0.85rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 0.75rem;
+}
+
+.manager-details summary {
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.manager-details-grid {
+  margin: 0.7rem 0 0;
+  gap: 0.5rem;
+}
+
+.manager-details-grid dt {
+  font-size: 0.66rem;
+}
+
+.manager-details-grid dd {
+  font-size: 0.95rem;
 }
 
 .alert-banner {
@@ -367,29 +397,35 @@ h4 {
 }
 
 .plugin-meta {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.42rem;
 }
 
 .plugin-meta div {
-  padding: 0.56rem 0.72rem;
-  border-radius: 12px;
+  min-width: 132px;
+  padding: 0.38rem 0.58rem 0.42rem;
+  border-radius: 10px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015));
 }
 
 .plugin-meta dt {
   color: rgba(255, 255, 255, 0.6);
-  font-size: 0.68rem;
+  font-size: 0.6rem;
   text-transform: uppercase;
   letter-spacing: 0.12em;
-  margin-bottom: 0.15rem;
+  margin-bottom: 0.08rem;
 }
 
 .plugin-meta dd {
   margin: 0;
-  font-size: 0.9rem;
-  line-height: 1.28;
+  font-size: 0.82rem;
+  line-height: 1.18;
+}
+
+.plugin-meta div:nth-child(3) {
+  flex: 1 1 240px;
+  min-width: 220px;
 }
 
 .status-pill {
@@ -655,9 +691,6 @@ h4 {
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   }
 
-  .plugin-meta {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 @media (max-width: 720px) {
@@ -666,7 +699,6 @@ h4 {
     padding: 1rem;
   }
 
-  .plugin-meta,
   .summary-grid {
     grid-template-columns: 1fr;
   }
@@ -686,5 +718,21 @@ h4 {
 
   .version-picker {
     min-width: 100%;
+  }
+
+  .plugin-meta {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .plugin-meta div,
+  .plugin-meta div:nth-child(3) {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .plugin-meta {
+    grid-template-columns: 1fr;
   }
 }

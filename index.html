@@ -20,7 +20,7 @@
           <div class="panel-header">
             <h2>Manager</h2>
           </div>
-          <dl class="summary-grid">
+          <dl class="summary-grid manager-summary-grid">
             <div>
               <dt>Version</dt>
               <dd id="manager-version">-</dd>
@@ -29,19 +29,24 @@
               <dt>Platform</dt>
               <dd id="manager-platform">-</dd>
             </div>
-            <div>
-              <dt>Catalog</dt>
-              <dd id="catalog-source">-</dd>
-            </div>
-            <div>
-              <dt>Updater</dt>
-              <dd id="updater-status">-</dd>
-            </div>
           </dl>
           <div class="button-row">
             <button id="refresh-button" class="primary">Refresh Plugin Catalog</button>
             <button id="check-updates-button">Check for Manager Updates</button>
           </div>
+          <details class="manager-details">
+            <summary>Manager details</summary>
+            <dl class="summary-grid manager-details-grid">
+              <div>
+                <dt>Catalog</dt>
+                <dd id="catalog-source">-</dd>
+              </div>
+              <div>
+                <dt>Updater</dt>
+                <dd id="updater-status">-</dd>
+              </div>
+            </dl>
+          </details>
         </section>
 
         <section class="panel compact">
