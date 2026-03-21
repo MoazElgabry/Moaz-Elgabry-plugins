@@ -94,7 +94,7 @@ jobs:
 
       - name: Upload Windows workflow artifacts
         if: matrix.platform == 'windows-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: moaz-elgabry-plugins-${{ matrix.platform }}
           path: |
@@ -104,7 +104,7 @@ jobs:
 
       - name: Upload macOS workflow artifacts
         if: matrix.platform == 'macos-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: moaz-elgabry-plugins-${{ matrix.platform }}
           path: |
@@ -115,7 +115,7 @@ jobs:
 
       - name: Upload Linux workflow artifacts
         if: matrix.platform == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: moaz-elgabry-plugins-${{ matrix.platform }}
           path: |
