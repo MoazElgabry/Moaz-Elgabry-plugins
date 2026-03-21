@@ -256,6 +256,34 @@ fn classify_error<'a>(operation: &'a str, message: &'a str, details: &'a str) ->
         );
     }
 
+    if details.contains("requires a managed install") {
+        return (
+            "uninstall_force_required",
+            "This detected install was not manager-controlled. Use the explicit force uninstall option to remove it.",
+        );
+    }
+
+    if details.contains("No installed bundle was found for this plugin") {
+        return (
+            "bundle_missing",
+            "No installed plugin bundle was found to uninstall.",
+        );
+    }
+
+    if details.contains("uninstall could not start with administrator privileges") {
+        return (
+            "uninstall_privilege_failed",
+            "The uninstall could not start with administrator privileges.",
+        );
+    }
+
+    if details.contains("uninstall failed") || details.contains("Failed to start elevated") {
+        return (
+            "uninstall_failed",
+            "The plugin uninstall could not be completed.",
+        );
+    }
+
     if operation == "dashboard" {
         return (
             "catalog_refresh_failed",

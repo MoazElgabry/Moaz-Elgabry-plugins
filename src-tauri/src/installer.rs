@@ -127,6 +127,10 @@ pub async fn apply_plugin_action(
     action: &str,
     target_version: Option<&str>,
 ) -> Result<PluginOperationResult> {
+    if action == "uninstall" || action == "force-uninstall" {
+        return uninstall_plugin(plugin_id, action).await;
+    }
+
     let resolved = catalog::resolve_plugin(plugin_id, target_version).await?;
     ensure_supported_package(&resolved.package)?;
     ensure_hosts_closed(&resolved.package.host_processes)?;
@@ -230,6 +234,63 @@ pub async fn apply_plugin_action(
             resolved.version,
             install_root.display()
         ),
+    })
+}
+
+async fn uninstall_plugin(plugin_id: &str, action: &str) -> Result<PluginOperationResult> {
+    let resolved = catalog::resolve_plugin(plugin_id, None).await?;
+    ensure_hosts_closed(&resolved.package.host_processes)?;
+
+    let install_root = PathBuf::from(&resolved.package.install_path);
+    let target_bundle = install_root.join(&resolved.package.bundle_name);
+    let install_key = install_key(plugin_id, &target_bundle);
+    let mut state = load_install_state().unwrap_or_default();
+    let record = state.installs.get(&install_key).cloned();
+    let stamp = read_bundle_install_stamp(&target_bundle).ok().flatten();
+    let managed_install = record.is_some() || stamp.is_some();
+    let bundle_exists = target_bundle.exists();
+
+    if action == "uninstall" && !managed_install {
+        bail!("This uninstall requires a managed install. Use force-uninstall to remove a detected unmanaged bundle.");
+    }
+
+    if !bundle_exists && record.is_none() && stamp.is_none() {
+        bail!("No installed bundle was found for this plugin.");
+    }
+
+    if bundle_exists {
+        if cfg!(target_os = "windows") {
+            privileged_uninstall_windows(&target_bundle, &resolved.package.bundle_name)?;
+        } else if cfg!(target_os = "macos") {
+            privileged_uninstall_macos(&target_bundle, &resolved.package.bundle_name)?;
+        } else if cfg!(target_os = "linux") {
+            privileged_uninstall_linux(&target_bundle, &resolved.package.bundle_name)?;
+        } else {
+            bail!("Only macOS, Windows, and Linux are supported in v1");
+        }
+    }
+
+    state.installs.remove(&install_key);
+    save_install_state(&state)?;
+
+    let message = if bundle_exists {
+        format!(
+            "{} was uninstalled from {}.",
+            resolved.manifest.display_name,
+            install_root.display()
+        )
+    } else {
+        format!(
+            "{} was already missing from disk. Manager tracking was cleaned up.",
+            resolved.manifest.display_name
+        )
+    };
+
+    Ok(PluginOperationResult {
+        plugin_id: plugin_id.to_string(),
+        action: action.to_string(),
+        status: "success".to_string(),
+        message,
     })
 }
 
@@ -638,6 +699,102 @@ catch {{
     )
 }
 
+fn privileged_uninstall_windows(target_bundle: &Path, _bundle_name: &str) -> Result<()> {
+    let token = format!(
+        "{}-{}",
+        std::process::id(),
+        Utc::now().timestamp_millis()
+    );
+    let script_dir = std::env::temp_dir().join("Moaz Elgabry Plugins");
+    fs::create_dir_all(&script_dir)
+        .with_context(|| format!("Failed to create {}", script_dir.display()))?;
+    let script_path = script_dir.join(format!("uninstall-plugin-{token}.ps1"));
+    let log_path = script_dir.join(format!("uninstall-plugin-{token}.log"));
+    let script = format!(
+        r#"$ErrorActionPreference = "Stop"
+$TargetBundle = '{target}'
+$LogPath = '{log}'
+$StampPath = Join-Path $TargetBundle 'Contents\Resources\moaz-elgabry-plugins.install.json'
+$LegacyStampPath = Join-Path $TargetBundle 'Contents\Resources\moazelgabry-plugin-manager.install.json'
+
+function Write-UninstallLog([string]$Message) {{
+  $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+  Add-Content -Path $LogPath -Value "[$timestamp] $Message"
+}}
+
+Set-Content -Path $LogPath -Value ""
+Write-UninstallLog "Starting Windows plugin uninstall"
+Write-UninstallLog "TargetBundle=$TargetBundle"
+
+if (!(Test-Path $TargetBundle)) {{
+  Write-UninstallLog "Target bundle already missing"
+  exit 0
+}}
+
+if (Test-Path $StampPath) {{ Remove-Item $StampPath -Force }}
+if (Test-Path $LegacyStampPath) {{ Remove-Item $LegacyStampPath -Force }}
+Remove-Item -LiteralPath $TargetBundle -Recurse -Force
+Write-UninstallLog "Uninstall completed successfully"
+"#,
+        target = escape_ps(&target_bundle.display().to_string()),
+        log = escape_ps(&log_path.display().to_string())
+    );
+    fs::write(&script_path, script)
+        .with_context(|| format!("Failed to write {}", script_path.display()))?;
+
+    let outer_command = format!(
+        "$ErrorActionPreference='Stop'; Set-Content -Path '{}' -Value ''; Add-Content -Path '{}' -Value '[outer] launching elevated uninstaller'; try {{ $ps = Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'; $argList = '-NoProfile -ExecutionPolicy Bypass -File \"{}\"'; Add-Content -Path '{}' -Value ('[outer] command: ' + $ps + ' ' + $argList); $p = Start-Process -FilePath $ps -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ArgumentList $argList; Add-Content -Path '{}' -Value ('[outer] elevated uninstaller exit code: ' + $p.ExitCode); exit $p.ExitCode }} catch {{ Add-Content -Path '{}' -Value ('[outer] ERROR: ' + $_.Exception.Message); if ($_.ScriptStackTrace) {{ Add-Content -Path '{}' -Value ('[outer] STACK: ' + $_.ScriptStackTrace) }} exit 1 }}",
+        escape_ps(&log_path.display().to_string()),
+        escape_ps(&log_path.display().to_string()),
+        escape_ps(&script_path.display().to_string()),
+        escape_ps(&log_path.display().to_string()),
+        escape_ps(&log_path.display().to_string()),
+        escape_ps(&log_path.display().to_string()),
+        escape_ps(&log_path.display().to_string())
+    );
+
+    let mut command = Command::new("powershell.exe");
+    command.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &outer_command]);
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW);
+    let status = command
+        .status()
+        .context("Failed to start elevated PowerShell uninstaller")?;
+
+    if status.success() {
+        let _ = fs::remove_file(&script_path);
+        let _ = fs::remove_file(&log_path);
+        return Ok(());
+    }
+
+    let details = fs::read_to_string(&log_path).unwrap_or_default();
+    let _ = fs::remove_file(&script_path);
+    if details.trim().is_empty() {
+        bail!(
+            "Windows uninstall was cancelled or failed with exit code {:?}. Log file: {}",
+            status.code(),
+            log_path.display()
+        );
+    }
+
+    let inner_started = details.contains("Starting Windows plugin uninstall");
+    if !inner_started {
+        bail!(
+            "Windows uninstall could not start with administrator privileges. Please accept the Windows admin prompt and try again. Exit code {:?}. Log file: {}. Details: {}",
+            status.code(),
+            log_path.display(),
+            details.trim()
+        );
+    }
+
+    bail!(
+        "Windows uninstall failed with exit code {:?}. Log file: {}. Details: {}",
+        status.code(),
+        log_path.display(),
+        details.trim()
+    )
+}
+
 fn privileged_install_macos(
     source_bundle: &Path,
     install_root: &Path,
@@ -722,6 +879,58 @@ trap - EXIT
     }
 
     bail!("macOS installation was cancelled or failed with exit code {:?}", status.code())
+}
+
+fn privileged_uninstall_macos(target_bundle: &Path, bundle_name: &str) -> Result<()> {
+    let script_dir = tempdir().context("Failed to create temp directory for uninstaller script")?;
+    let script_path = script_dir.path().join("uninstall-plugin.sh");
+    let script = format!(r#"#!/bin/sh
+set -e
+
+TARGET_BUNDLE="$1"
+BUNDLE_NAME="$2"
+
+if [ ! -d "$TARGET_BUNDLE" ]; then
+  exit 0
+fi
+
+rm -f "$TARGET_BUNDLE/Contents/Resources/moaz-elgabry-plugins.install.json"
+rm -f "$TARGET_BUNDLE/Contents/Resources/moazelgabry-plugin-manager.install.json"
+rm -rf "$TARGET_BUNDLE"
+"#);
+    fs::write(&script_path, script)
+        .with_context(|| format!("Failed to write {}", script_path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(&script_path)?.permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script_path, permissions)?;
+    }
+
+    let escaped_script = escape_osascript(&script_path.display().to_string());
+    let escaped_target = escape_osascript(&target_bundle.display().to_string());
+    let escaped_bundle = escape_osascript(bundle_name);
+
+    let status = Command::new("osascript")
+        .args([
+            "-e",
+            &format!(r#"set scriptPath to "{}""#, escaped_script),
+            "-e",
+            &format!(r#"set targetBundle to "{}""#, escaped_target),
+            "-e",
+            &format!(r#"set bundleName to "{}""#, escaped_bundle),
+            "-e",
+            r#"do shell script quoted form of scriptPath & " " & quoted form of targetBundle & " " & quoted form of bundleName with administrator privileges"#,
+        ])
+        .status()
+        .context("Failed to start elevated macOS uninstaller")?;
+
+    if status.success() {
+        return Ok(());
+    }
+
+    bail!("macOS uninstall was cancelled or failed with exit code {:?}", status.code())
 }
 
 fn privileged_install_linux(
@@ -836,6 +1045,87 @@ trap - EXIT
 
     bail!(
         "Linux installation failed with exit code {:?}. Log file: {}. Details: {}",
+        status.code(),
+        log_path.display(),
+        details.trim()
+    )
+}
+
+fn privileged_uninstall_linux(target_bundle: &Path, bundle_name: &str) -> Result<()> {
+    let pkexec = find_linux_pkexec()
+        .ok_or_else(|| anyhow!("pkexec executable was not found. A PolicyKit-capable environment is required."))?;
+    let script_dir = tempdir().context("Failed to create temp directory for Linux uninstaller script")?;
+    let script_path = script_dir.path().join("uninstall-plugin.sh");
+    let log_path = std::env::temp_dir()
+        .join("Moaz Elgabry Plugins")
+        .join(format!(
+            "uninstall-plugin-{}-{}.log",
+            std::process::id(),
+            Utc::now().timestamp_millis()
+        ));
+    if let Some(parent) = log_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create {}", parent.display()))?;
+    }
+    let script = r#"#!/bin/sh
+set -eu
+
+TARGET_BUNDLE="$1"
+LOG_PATH="$2"
+BUNDLE_NAME="$3"
+
+write_log() {
+  printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "$LOG_PATH"
+}
+
+: > "$LOG_PATH"
+write_log "Starting Linux plugin uninstall"
+write_log "TargetBundle=$TARGET_BUNDLE"
+
+if [ ! -d "$TARGET_BUNDLE" ]; then
+  write_log "Target bundle already missing"
+  exit 0
+fi
+
+rm -f "$TARGET_BUNDLE/Contents/Resources/moaz-elgabry-plugins.install.json"
+rm -f "$TARGET_BUNDLE/Contents/Resources/moazelgabry-plugin-manager.install.json"
+rm -rf "$TARGET_BUNDLE"
+write_log "Uninstall completed successfully"
+"#;
+    fs::write(&script_path, script)
+        .with_context(|| format!("Failed to write {}", script_path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(&script_path)?.permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script_path, permissions)?;
+    }
+
+    let status = Command::new(pkexec)
+        .arg(&script_path)
+        .arg(target_bundle)
+        .arg(&log_path)
+        .arg(bundle_name)
+        .status()
+        .context("Failed to start elevated Linux uninstaller")?;
+
+    if status.success() {
+        let _ = fs::remove_file(&log_path);
+        return Ok(());
+    }
+
+    let details = fs::read_to_string(&log_path).unwrap_or_default();
+    if details.trim().is_empty() {
+        bail!(
+            "Linux uninstall was cancelled or failed with exit code {:?}. Log file: {}",
+            status.code(),
+            log_path.display()
+        );
+    }
+
+    bail!(
+        "Linux uninstall failed with exit code {:?}. Log file: {}. Details: {}",
         status.code(),
         log_path.display(),
         details.trim()

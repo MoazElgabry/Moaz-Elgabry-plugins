@@ -48,6 +48,9 @@ function operationSteps(kind) {
   if (kind === "manager-update") {
     return ["Checking for updates", "Downloading manager update", "Installing manager update"];
   }
+  if (kind === "plugin-uninstall") {
+    return ["Preparing uninstall", "Removing installed bundle", "Cleaning manager records", "Refreshing plugin status"];
+  }
   return ["Preparing package", "Downloading package", "Installing plugin", "Refreshing plugin status"];
 }
 
@@ -190,7 +193,15 @@ function cardToneClass(plugin) {
 }
 
 function primaryActionClass(label) {
+  if (label === "Install") return "primary plugin-primary-action plugin-install-action";
+  if (label === "Update") return "primary plugin-primary-action plugin-update-action";
   return label === "Reinstall" ? "plugin-secondary-action" : "primary plugin-primary-action";
+}
+
+function actionHelperText(primaryLabel) {
+  if (primaryLabel === "Update") return "Install the latest release.";
+  if (primaryLabel === "Reinstall") return "Reinstall the current version.";
+  return "";
 }
 
 function pluginOperationMarkup(plugin) {
@@ -209,6 +220,53 @@ function pluginOperationMarkup(plugin) {
       </div>
     </div>
   `;
+}
+
+function uninstallButtonLabel(plugin) {
+  return plugin.managedInstall ? "Uninstall plugin" : "Force uninstall";
+}
+
+function uninstallConfirmationMessage(plugin) {
+  const intro = plugin.managedInstall
+    ? `Uninstall ${plugin.displayName}?`
+    : `Force uninstall ${plugin.displayName}?`;
+  const warning = plugin.managedInstall
+    ? "This removes the installed OFX plugin from the system-wide plugin folder."
+    : "This install was not created by the manager. Force uninstall will still remove the detected OFX plugin from the system-wide plugin folder.";
+  return `${intro}\n\n${warning}`;
+}
+
+function renderMaintenanceDrawer(plugin) {
+  if (!plugin.installed) return null;
+
+  const wrapper = document.createElement("details");
+  wrapper.className = "maintenance-drawer";
+  wrapper.innerHTML = `
+    <summary class="maintenance-toggle">
+      <div class="maintenance-copy">
+        <p class="eyebrow">Maintenance</p>
+        <p class="maintenance-title">Uninstall plugin</p>
+      </div>
+      <span class="maintenance-icon" aria-hidden="true"></span>
+    </summary>
+    <div class="maintenance-tools">
+      <button class="danger-button" data-plugin-id="${plugin.pluginId}" data-action="${plugin.managedInstall ? "uninstall" : "force-uninstall"}">${uninstallButtonLabel(plugin)}</button>
+      ${
+        plugin.managedInstall
+          ? ""
+          : '<p class="maintenance-note">Use this only if you want the manager to remove a detected install it did not create.</p>'
+      }
+    </div>
+  `;
+
+  const button = wrapper.querySelector("button");
+  button.addEventListener("click", async () => {
+    const confirmed = window.confirm(uninstallConfirmationMessage(plugin));
+    if (!confirmed) return;
+    await applyPluginAction(plugin.pluginId, plugin.managedInstall ? "uninstall" : "force-uninstall");
+  });
+
+  return wrapper;
 }
 
 function pluginIconMarkup(plugin) {
@@ -245,15 +303,12 @@ function renderVersionDrawer(plugin) {
         <p class="eyebrow">Version history</p>
         <p class="version-drawer-title">Older versions and rollback</p>
       </div>
-      <div class="version-drawer-preview-wrap">
-        <span class="version-drawer-preview">${versionDrawerPreview(plugin, initialVersion)}</span>
-        <span class="version-drawer-icon" aria-hidden="true"></span>
-      </div>
+      <span class="version-drawer-icon" aria-hidden="true"></span>
     </summary>
     <div class="version-tools">
       <div class="version-tools-copy">
         <p class="eyebrow">Selective version install</p>
-        <p class="subtle">Use this when an older project needs a matching plugin version, or when you want to reinstall a known-good release.</p>
+        <p class="subtle">Choose a different version when a project needs an older match.</p>
       </div>
       <div class="version-picker-row">
         <label class="version-picker">
@@ -276,12 +331,10 @@ function renderVersionDrawer(plugin) {
   const select = wrapper.querySelector("select");
   const installSelectedButton = wrapper.querySelector("button");
   const hint = wrapper.querySelector(".version-hint");
-  const preview = wrapper.querySelector(".version-drawer-preview");
 
   const refreshCopy = () => {
     installSelectedButton.textContent = rollbackButtonLabel(plugin, select.value);
     hint.textContent = selectedVersionHint(plugin, select.value);
-    preview.textContent = versionDrawerPreview(plugin, select.value);
   };
 
   refreshCopy();
@@ -310,6 +363,7 @@ function renderPlugins() {
     const installedVersion = plugin.installedVersion ?? (plugin.installed ? "Unknown" : "Not installed");
     const managedBadge = plugin.managedInstall ? "Managed install" : "Detected install";
     const primaryLabel = actionLabel(plugin);
+    const helperText = actionHelperText(primaryLabel);
     card.innerHTML = `
       <header>
         <div class="plugin-heading">
@@ -318,7 +372,7 @@ function renderPlugins() {
           <h3>${plugin.displayName}</h3>
           </div>
         </div>
-        <span class="status-pill ${statusClass(plugin.status)}">${plugin.status}</span>
+        <span class="status-pill ${statusClass(plugin.status)} ${plugin.status === "Ready to install" ? "ready" : ""}">${plugin.status}</span>
       </header>
 
       <dl class="plugin-meta">
@@ -342,7 +396,7 @@ function renderPlugins() {
 
       <div class="plugin-actions">
         <button class="${primaryActionClass(primaryLabel)}" data-plugin-id="${plugin.pluginId}" data-action="apply">${primaryLabel}</button>
-        <p class="action-helper">${primaryLabel === "Update" ? "Latest release ready to install." : "Manager-controlled system-wide OFX install."}</p>
+        ${helperText ? `<p class="action-helper">${helperText}</p>` : ""}
       </div>
       ${pluginOperationMarkup(plugin)}
     `;
@@ -354,6 +408,11 @@ function renderPlugins() {
 
     if (plugin.availableVersions?.length) {
       card.appendChild(renderVersionDrawer(plugin));
+    }
+
+    const maintenanceDrawer = renderMaintenanceDrawer(plugin);
+    if (maintenanceDrawer) {
+      card.appendChild(maintenanceDrawer);
     }
 
     elements.pluginList.appendChild(card);
@@ -392,8 +451,12 @@ async function applyPluginAction(pluginId, action, targetVersion = null) {
   const activeLabel =
     action === "install-selected"
       ? "Installing selected version"
-      : `${action.replace("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase())} in progress`;
-  startOperation("plugin", pluginId, activeLabel);
+      : action === "uninstall"
+        ? "Uninstalling plugin"
+        : action === "force-uninstall"
+          ? "Force uninstalling plugin"
+          : `${action.replace("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase())} in progress`;
+  startOperation(action.includes("uninstall") ? "plugin-uninstall" : "plugin", pluginId, activeLabel);
   setBusy(true);
   try {
     hideAlert();
