@@ -57,35 +57,22 @@ jobs:
             "should_build=true" >> $env:GITHUB_OUTPUT
             exit 0
           }
-          if (-not $release.draft) {
-            $releaseUrl = if ($release.html_url) { $release.html_url } else { "https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$tag" }
-            $assetCount = @($release.assets).Count
-            "should_build=false" >> $env:GITHUB_OUTPUT
-            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Release build skipped because $tag is already published."
-            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
-            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Release URL: $releaseUrl"
-            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Release ID: $($release.id)"
-            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Draft: $($release.draft)"
-            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Prerelease: $($release.prerelease)"
-            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Assets found: $assetCount"
-            Write-Host "Published release already exists for $tag. Skipping build."
-            exit 0
-          }
-
-          Write-Host "Deleting stale draft release $tag (id=$($release.id))"
-          gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)"
-
-          $tagRef = "repos/$env:GITHUB_REPOSITORY/git/refs/tags/$tag"
-          $existingTagRef = $null
-          $PSNativeCommandUseErrorActionPreference = $false
-          $existingTagRef = gh api $tagRef 2>$null
-          if ($LASTEXITCODE -eq 0 -and $existingTagRef) {
-            gh api --method DELETE $tagRef
+          $releaseUrl = if ($release.html_url) { $release.html_url } else { "https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$tag" }
+          $assetCount = @($release.assets).Count
+          "should_build=false" >> $env:GITHUB_OUTPUT
+          if ($release.draft) {
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Release build skipped because a draft release for $tag already exists."
           } else {
-            Write-Host "No stale git tag ref to delete for $tag"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Release build skipped because $tag is already published."
           }
-          $global:LASTEXITCODE = 0
-          "should_build=true" >> $env:GITHUB_OUTPUT
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Release URL: $releaseUrl"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Release ID: $($release.id)"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Draft: $($release.draft)"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Prerelease: $($release.prerelease)"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Assets found: $assetCount"
+          Write-Host "Release already exists for $tag. Preserving it and skipping build."
+          exit 0
 
   build:
     needs: prepare_release
