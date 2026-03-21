@@ -27,6 +27,7 @@ jobs:
       contents: write
     outputs:
       app_version: ${{ steps.version.outputs.app_version }}
+      should_build: ${{ steps.release_guard.outputs.should_build }}
     steps:
       - uses: actions/checkout@v5
 
@@ -41,6 +42,7 @@ jobs:
           echo "app_version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
       - name: Remove stale draft release for this version
+        id: release_guard
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -50,13 +52,16 @@ jobs:
           $releaseJson = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" 2>$null
           if (-not $releaseJson) {
             Write-Host "No existing release found for $tag"
+            "should_build=true" >> $env:GITHUB_OUTPUT
             exit 0
           }
 
           $release = $releaseJson | ConvertFrom-Json
           if (-not $release.draft) {
-            Write-Error "A published release already exists for $tag. Bump the version before building again."
-            exit 1
+            Write-Host "A published release already exists for $tag. Skipping release build."
+            "should_build=false" >> $env:GITHUB_OUTPUT
+            "Release build skipped because $tag is already published." >> $env:GITHUB_STEP_SUMMARY
+            exit 0
           }
 
           Write-Host "Deleting stale draft release $tag (id=$($release.id))"
@@ -67,9 +72,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             Write-Host "No stale git tag ref to delete for $tag"
           }
+          "should_build=true" >> $env:GITHUB_OUTPUT
 
   build:
     needs: prepare_release
+    if: needs.prepare_release.outputs.should_build == 'true'
     permissions:
       contents: write
     strategy:
