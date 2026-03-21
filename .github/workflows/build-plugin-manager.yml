@@ -47,22 +47,47 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APP_VERSION: ${{ steps.version.outputs.app_version }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           $tag = "plugin-manager-v$env:APP_VERSION"
           $releasesJson = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100"
           $releases = $releasesJson | ConvertFrom-Json
           $release = $releases | Where-Object { $_.tag_name -eq $tag } | Select-Object -First 1
           if (-not $release) {
-            Write-Host "No existing release found for $tag"
+            Write-Host "No existing release found for $tag. Creating draft release shell."
+            $createdReleaseJson = gh api "repos/$env:GITHUB_REPOSITORY/releases" `
+              --method POST `
+              --field tag_name="$tag" `
+              --field target_commitish="$env:GITHUB_SHA" `
+              --field name="Moaz Elgabry Plugins v$env:APP_VERSION" `
+              --field body="See the release assets for desktop build artifacts." `
+              --raw-field draft=true `
+              --raw-field prerelease=false
+            $createdRelease = $createdReleaseJson | ConvertFrom-Json
             "should_build=true" >> $env:GITHUB_OUTPUT
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Created draft release shell for $tag."
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Release URL: $($createdRelease.html_url)"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Release ID: $($createdRelease.id)"
             exit 0
           }
           $releaseUrl = if ($release.html_url) { $release.html_url } else { "https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$tag" }
           $assetCount = @($release.assets).Count
-          "should_build=false" >> $env:GITHUB_OUTPUT
           if ($release.draft) {
+            if ([int]$env:RUN_ATTEMPT -gt 1) {
+              "should_build=true" >> $env:GITHUB_OUTPUT
+              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Reusing existing draft release for $tag on rerun."
+              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Release URL: $releaseUrl"
+              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Release ID: $($release.id)"
+              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Assets found: $assetCount"
+              Write-Host "Draft release already exists for $tag. Reusing it on rerun."
+              exit 0
+            }
+            "should_build=false" >> $env:GITHUB_OUTPUT
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Release build skipped because a draft release for $tag already exists."
           } else {
+            "should_build=false" >> $env:GITHUB_OUTPUT
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Release build skipped because $tag is already published."
           }
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
