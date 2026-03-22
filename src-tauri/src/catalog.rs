@@ -3,6 +3,7 @@ use crate::models::{
     CatalogEntry, DashboardState, ManagerSummary, PlatformPackage, PluginCatalogIndex, PluginManifest,
     PluginRelease, PluginStatus, ResolvedPlugin, VersionOption,
 };
+use crate::settings;
 use anyhow::{anyhow, Context, Result};
 use reqwest::Client;
 use semver::Version;
@@ -28,7 +29,8 @@ pub struct CatalogBundle {
 }
 
 pub async fn build_dashboard_state() -> Result<DashboardState> {
-    let bundle = load_catalog_bundle().await?;
+    let app_settings = settings::load_settings()?;
+    let bundle = load_catalog_bundle(app_settings.beta_releases_enabled).await?;
     let install_state = installer::load_install_state()?;
     let manager = ManagerSummary {
         app_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -36,6 +38,7 @@ pub async fn build_dashboard_state() -> Result<DashboardState> {
         arch: installer::current_arch().to_string(),
         updater_configured: installer::updater_configured(),
         catalog_url: bundle.source_label.clone(),
+        beta_releases_enabled: app_settings.beta_releases_enabled,
     };
 
     let plugins = bundle
@@ -56,7 +59,8 @@ pub async fn build_dashboard_state() -> Result<DashboardState> {
 }
 
 pub async fn resolve_plugin(plugin_id: &str, requested_version: Option<&str>) -> Result<ResolvedPlugin> {
-    let bundle = load_catalog_bundle().await?;
+    let app_settings = settings::load_settings()?;
+    let bundle = load_catalog_bundle(app_settings.beta_releases_enabled).await?;
     let manifest = bundle
         .manifests
         .get(plugin_id)
@@ -226,7 +230,7 @@ fn resolve_release(manifest: &PluginManifest, requested_version: Option<&str>) -
         .ok_or_else(|| anyhow!("Latest plugin version was not found in the manifest"))?)
 }
 
-async fn load_catalog_bundle() -> Result<CatalogBundle> {
+async fn load_catalog_bundle(prefer_beta: bool) -> Result<CatalogBundle> {
     if cfg!(debug_assertions) {
         if let Some(bundle) = load_local_dev_catalog()? {
             return Ok(bundle);
@@ -245,10 +249,7 @@ async fn load_catalog_bundle() -> Result<CatalogBundle> {
 
     let mut manifests = HashMap::new();
     for entry in &index.plugins {
-        let manifest = match fetch_json::<PluginManifest>(&client, &entry.manifest_url).await {
-            Ok(value) => value,
-            Err(_) => embedded_manifest(&entry.plugin_id)?,
-        };
+        let manifest = load_manifest_for_entry(&client, entry, prefer_beta).await?;
         manifests.insert(entry.plugin_id.clone(), manifest);
     }
 
@@ -258,6 +259,25 @@ async fn load_catalog_bundle() -> Result<CatalogBundle> {
         entries: index.plugins,
         manifests,
     })
+}
+
+async fn load_manifest_for_entry(
+    client: &Client,
+    entry: &CatalogEntry,
+    prefer_beta: bool,
+) -> Result<PluginManifest> {
+    if prefer_beta {
+        if let Some(beta_url) = beta_manifest_url(&entry.manifest_url) {
+            if let Ok(value) = fetch_json::<PluginManifest>(client, &beta_url).await {
+                return Ok(value);
+            }
+        }
+    }
+
+    match fetch_json::<PluginManifest>(client, &entry.manifest_url).await {
+        Ok(value) => Ok(value),
+        Err(_) => embedded_manifest(&entry.plugin_id),
+    }
 }
 
 fn load_local_dev_catalog() -> Result<Option<CatalogBundle>> {
@@ -396,4 +416,10 @@ fn normalize_path_text(raw: &str) -> String {
     {
         raw.replace('\\', "/")
     }
+}
+
+fn beta_manifest_url(raw: &str) -> Option<String> {
+    raw.strip_suffix("/stable.json")
+        .map(|base| format!("{base}/beta.json"))
+        .or_else(|| raw.strip_suffix("\\stable.json").map(|base| format!("{base}\\beta.json")))
 }

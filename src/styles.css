@@ -314,6 +314,40 @@ h4 {
   font-size: 0.95rem;
 }
 
+.toggle-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.9rem;
+  margin-top: 0.85rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+}
+
+.toggle-row span {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.toggle-row strong {
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.toggle-row small {
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.toggle-row input[type="checkbox"] {
+  width: 1.05rem;
+  height: 1.05rem;
+  accent-color: var(--blue);
+  cursor: pointer;
+}
+
 .alert-banner {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

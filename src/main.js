@@ -16,6 +16,7 @@ const elements = {
   platform: document.querySelector("#manager-platform"),
   catalogSource: document.querySelector("#catalog-source"),
   updaterStatus: document.querySelector("#updater-status"),
+  betaToggle: document.querySelector("#beta-releases-toggle"),
   refreshButton: document.querySelector("#refresh-button"),
   updateButton: document.querySelector("#check-updates-button"),
   pluginList: document.querySelector("#plugin-list"),
@@ -36,8 +37,8 @@ function logActivity(message) {
 
 function setBusy(nextBusy) {
   state.busy = nextBusy;
-  document.querySelectorAll("button").forEach((button) => {
-    button.disabled = nextBusy;
+  document.querySelectorAll("button, select, input").forEach((element) => {
+    element.disabled = nextBusy;
   });
 }
 
@@ -437,7 +438,25 @@ function renderDashboard() {
   elements.platform.textContent = `${manager.platform} / ${manager.arch}`;
   elements.catalogSource.textContent = `${state.dashboard.catalogSource} feed`;
   elements.updaterStatus.textContent = manager.updaterConfigured ? "Configured" : "Not configured";
+  elements.betaToggle.checked = Boolean(manager.betaReleasesEnabled);
   renderPlugins();
+}
+
+async function updateBetaReleasesPreference(enabled) {
+  setBusy(true);
+  try {
+    hideAlert();
+    await invoke("set_beta_releases_enabled", { enabled });
+    logActivity(enabled ? "Beta releases enabled." : "Beta releases disabled.");
+    await refreshDashboard();
+  } catch (error) {
+    elements.betaToggle.checked = !enabled;
+    const parsed = parseUiError(error, "Couldn't update beta release settings.");
+    showAlert(parsed);
+    logActivity(`Beta release setting failed: ${parsed.summary}`);
+  } finally {
+    setBusy(false);
+  }
 }
 
 async function refreshDashboard() {
@@ -522,5 +541,8 @@ async function checkForManagerUpdates() {
 elements.refreshButton.addEventListener("click", refreshDashboard);
 elements.updateButton.addEventListener("click", checkForManagerUpdates);
 elements.alertDismiss.addEventListener("click", hideAlert);
+elements.betaToggle.addEventListener("change", (event) => {
+  updateBetaReleasesPreference(event.currentTarget.checked);
+});
 
 refreshDashboard();
