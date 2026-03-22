@@ -1,0 +1,80 @@
+[
+  {
+    "tag_name": "v1.0.0b3-beta1",
+    "name": "Chromaspace v1.0.0b3 beta 1",
+    "html_url": "https://github.com/MoazElgabry/Chromaspace/releases/tag/v1.0.0b3-beta1",
+    "body": "Public beta preview.",
+    "draft": false,
+    "prerelease": true,
+    "published_at": "2026-03-22T10:00:00Z",
+    "assets": [
+      {
+        "name": "Chromaspace_v1.0.0b3-beta1_windows_x86_64_portable.zip",
+        "browser_download_url": "https://github.com/MoazElgabry/Chromaspace/releases/download/v1.0.0b3-beta1/Chromaspace_v1.0.0b3-beta1_windows_x86_64_portable.zip",
+        "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      {
+        "name": "Chromaspace_v1.0.0b3-beta1_macOS_universal_portable.zip",
+        "browser_download_url": "https://github.com/MoazElgabry/Chromaspace/releases/download/v1.0.0b3-beta1/Chromaspace_v1.0.0b3-beta1_macOS_universal_portable.zip",
+        "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+      },
+      {
+        "name": "Chromaspace_v1.0.0b3-beta1_linux_x86_64_portable.tar.gz",
+        "browser_download_url": "https://github.com/MoazElgabry/Chromaspace/releases/download/v1.0.0b3-beta1/Chromaspace_v1.0.0b3-beta1_linux_x86_64_portable.tar.gz",
+        "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    ]
+  },
+  {
+    "tag_name": "v1.0.0b2",
+    "name": "Chromaspace v1.0.0b2",
+    "html_url": "https://github.com/MoazElgabry/Chromaspace/releases/tag/v1.0.0b2",
+    "body": "Current stable release.",
+    "draft": false,
+    "prerelease": false,
+    "published_at": "2026-03-21T00:00:00Z",
+    "assets": [
+      {
+        "name": "Chromaspace_v1.0.0b2_windows_x86_64_portable.zip",
+        "browser_download_url": "https://github.com/MoazElgabry/Chromaspace/releases/download/v1.0.0b2/Chromaspace_v1.0.0b2_windows_x86_64_portable.zip",
+        "digest": "sha256:208723e27317643e76be2561d65aa6650e5d65f0bf49eb6bb2d5b8ccf4c62e2f"
+      },
+      {
+        "name": "Chromaspace_v1.0.0b2_macOS_universal_portable.zip",
+        "browser_download_url": "https://github.com/MoazElgabry/Chromaspace/releases/download/v1.0.0b2/Chromaspace_v1.0.0b2_macOS_universal_portable.zip",
+        "digest": "sha256:f14f3dffce0b6b0bb638bd7bd68abb924255ffd036cdce59f8b85be35c88c5ad"
+      },
+      {
+        "name": "Chromaspace_v1.0.0b2_linux_x86_64_portable.tar.gz",
+        "browser_download_url": "https://github.com/MoazElgabry/Chromaspace/releases/download/v1.0.0b2/Chromaspace_v1.0.0b2_linux_x86_64_portable.tar.gz",
+        "digest": "sha256:39d7a3cbadc176b8207732c6ade81446d5b6c8a1ee2bc17f4dcda3589f17619c"
+      }
+    ]
+  },
+  {
+    "tag_name": "v1.0.0b",
+    "name": "Chromaspace v1.0.0b",
+    "html_url": "https://github.com/MoazElgabry/Chromaspace/releases/tag/v1.0.0b",
+    "body": "Previous stable.\nmanager-available-stable: true",
+    "draft": false,
+    "prerelease": false,
+    "published_at": "2026-03-20T00:00:00Z",
+    "assets": [
+      {
+        "name": "Chromaspace_v1.0.0b_Windows_portable.zip",
+        "browser_download_url": "https://github.com/MoazElgabry/Chromaspace/releases/download/v1.0.0b/Chromaspace_v1.0.0b_Windows_portable.zip",
+        "digest": "sha256:20e5aeeab2314620ca7f9350992bba9f564b027cf0d365c9f2a266212edae0b9"
+      },
+      {
+        "name": "Chromaspace_v1.0.0b_macOS_universal_portable.zip",
+        "browser_download_url": "https://github.com/MoazElgabry/Chromaspace/releases/download/v1.0.0b/Chromaspace_v1.0.0b_macOS_universal_portable.zip",
+        "digest": "sha256:5fe3b06da616cc4e6f7dc4078f1eb135e818606ab4cafdc8e95ffef7ac0a17ef"
+      },
+      {
+        "name": "Chromaspace_v1.0.0b_linux_portable.tar.gz",
+        "browser_download_url": "https://github.com/MoazElgabry/Chromaspace/releases/download/v1.0.0b/Chromaspace_v1.0.0b_linux_portable.tar.gz",
+        "digest": "sha256:f0a7524afccd2d56e36a0d671ac52222113e3853a0ab35c58f8e7bfb6613c8bd"
+      }
+    ]
+  }
+]
