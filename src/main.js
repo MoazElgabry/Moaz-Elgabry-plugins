@@ -25,7 +25,12 @@ const elements = {
   alertSummary: document.querySelector("#alert-summary"),
   alertMessage: document.querySelector("#alert-message"),
   alertDetails: document.querySelector("#alert-details"),
-  alertDismiss: document.querySelector("#alert-dismiss")
+  alertDismiss: document.querySelector("#alert-dismiss"),
+  releaseHighlightsDialog: document.querySelector("#release-highlights-dialog"),
+  releaseHighlightsTitle: document.querySelector("#release-highlights-title"),
+  releaseHighlightsBody: document.querySelector("#release-highlights-body"),
+  releaseHighlightsLink: document.querySelector("#release-highlights-link"),
+  releaseHighlightsClose: document.querySelector("#release-highlights-close")
 };
 
 function logActivity(message) {
@@ -142,6 +147,79 @@ function hideAlert() {
   elements.alertDetails.open = false;
 }
 
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function hasReleaseHighlights(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function renderReleaseHighlightsMarkup(raw) {
+  if (!hasReleaseHighlights(raw)) {
+    return "<p>No version highlights were provided for this release.</p>";
+  }
+
+  const blocks = [];
+  let bulletItems = [];
+
+  const flushBullets = () => {
+    if (!bulletItems.length) {
+      return;
+    }
+    blocks.push(`<ul>${bulletItems.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`);
+    bulletItems = [];
+  };
+
+  for (const line of raw.replaceAll("\r\n", "\n").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flushBullets();
+      continue;
+    }
+
+    if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+      bulletItems.push(trimmed.slice(2).trim());
+      continue;
+    }
+
+    flushBullets();
+    blocks.push(`<p>${escapeHtml(trimmed)}</p>`);
+  }
+
+  flushBullets();
+  return blocks.join("");
+}
+
+function openReleaseHighlightsDialog({ pluginName, version, releaseNotesUrl, releaseHighlights }) {
+  elements.releaseHighlightsTitle.textContent = `${pluginName} ${version}`;
+  elements.releaseHighlightsBody.innerHTML = renderReleaseHighlightsMarkup(releaseHighlights);
+
+  if (releaseNotesUrl) {
+    elements.releaseHighlightsLink.href = releaseNotesUrl;
+    elements.releaseHighlightsLink.hidden = false;
+  } else {
+    elements.releaseHighlightsLink.hidden = true;
+    elements.releaseHighlightsLink.removeAttribute("href");
+  }
+
+  if (elements.releaseHighlightsDialog.open) {
+    elements.releaseHighlightsDialog.close();
+  }
+  elements.releaseHighlightsDialog.showModal();
+}
+
+function closeReleaseHighlightsDialog() {
+  if (elements.releaseHighlightsDialog.open) {
+    elements.releaseHighlightsDialog.close();
+  }
+}
+
 function statusClass(status) {
   if (status === "Installed" || status === "Up to date") return "ok";
   if (status === "Update available" || status === "Unmanaged install") return "warn";
@@ -196,6 +274,24 @@ function versionDrawerPreview(plugin, selectedVersion) {
   }
 
   return `Project compatibility: ${selected.version}`;
+}
+
+function findVersionOption(plugin, version) {
+  return plugin.availableVersions?.find((option) => option.version === version) ?? null;
+}
+
+function releaseInfoButtonMarkup(className = "") {
+  const resolvedClassName = className ? `release-info-button ${className}` : "release-info-button";
+  return `
+    <button
+      type="button"
+      class="${resolvedClassName}"
+      aria-label="View version highlights"
+      title="View version highlights"
+    >
+      <span aria-hidden="true">i</span>
+    </button>
+  `;
 }
 
 function cardToneClass(plugin) {
@@ -335,19 +431,25 @@ function renderVersionDrawer(plugin) {
               .join("")}
           </select>
         </label>
-        <button data-plugin-id="${plugin.pluginId}" data-action="install-selected">Install selected</button>
+        <div class="version-picker-actions">
+          <button type="button" data-plugin-id="${plugin.pluginId}" data-action="install-selected">Install selected</button>
+          ${releaseInfoButtonMarkup("rollback-info-button")}
+        </div>
       </div>
       <p class="version-hint"></p>
     </div>
   `;
 
   const select = wrapper.querySelector("select");
-  const installSelectedButton = wrapper.querySelector("button");
+  const installSelectedButton = wrapper.querySelector('[data-action="install-selected"]');
+  const infoButton = wrapper.querySelector(".rollback-info-button");
   const hint = wrapper.querySelector(".version-hint");
 
   const refreshCopy = () => {
+    const selected = findVersionOption(plugin, select.value);
     installSelectedButton.textContent = rollbackButtonLabel(plugin, select.value);
     hint.textContent = selectedVersionHint(plugin, select.value);
+    infoButton.hidden = !hasReleaseHighlights(selected?.releaseHighlights);
   };
 
   refreshCopy();
@@ -355,6 +457,18 @@ function renderVersionDrawer(plugin) {
   select.addEventListener("change", refreshCopy);
   installSelectedButton.addEventListener("click", async () => {
     await applyPluginAction(plugin.pluginId, "install-selected", select.value);
+  });
+  infoButton.addEventListener("click", () => {
+    const selected = findVersionOption(plugin, select.value);
+    if (!selected || !hasReleaseHighlights(selected.releaseHighlights)) {
+      return;
+    }
+    openReleaseHighlightsDialog({
+      pluginName: plugin.displayName,
+      version: selected.version,
+      releaseNotesUrl: selected.releaseNotesUrl,
+      releaseHighlights: selected.releaseHighlights
+    });
   });
 
   return wrapper;
@@ -377,6 +491,7 @@ function renderPlugins() {
     const managedBadge = plugin.managedInstall ? "Managed install" : "Detected install";
     const primaryLabel = actionLabel(plugin);
     const helperText = actionHelperText(primaryLabel);
+    const showLatestInfo = hasReleaseHighlights(plugin.releaseHighlights);
     card.innerHTML = `
       <header>
         <div class="plugin-heading">
@@ -408,18 +523,34 @@ function renderPlugins() {
       </dl>
 
       <div class="plugin-actions">
-        <button class="${primaryActionClass(primaryLabel)}" data-plugin-id="${plugin.pluginId}" data-action="apply">${primaryLabel}</button>
-        ${helperText ? `<p class="action-helper">${helperText}</p>` : ""}
+        <button type="button" class="${primaryActionClass(primaryLabel)}" data-plugin-id="${plugin.pluginId}" data-action="apply">${primaryLabel}</button>
+        ${
+          helperText
+            ? `<p class="action-helper">${helperText}</p>`
+            : '<span class="action-helper-placeholder" aria-hidden="true"></span>'
+        }
+        ${showLatestInfo ? releaseInfoButtonMarkup("main-action-info-button") : ""}
       </div>
       ${pluginOperationMarkup(plugin)}
     `;
 
-    const button = card.querySelector("button");
+    const button = card.querySelector('[data-action="apply"]');
     button.addEventListener("click", async () => {
       await applyPluginAction(plugin.pluginId, primaryLabel.toLowerCase());
     });
+    const infoButton = card.querySelector(".main-action-info-button");
+    if (infoButton) {
+      infoButton.addEventListener("click", () => {
+        openReleaseHighlightsDialog({
+          pluginName: plugin.displayName,
+          version: plugin.latestVersion,
+          releaseNotesUrl: plugin.releaseNotesUrl,
+          releaseHighlights: plugin.releaseHighlights
+        });
+      });
+    }
 
-    if (plugin.availableVersions?.length) {
+    if ((plugin.availableVersions?.length ?? 0) > 1) {
       card.appendChild(renderVersionDrawer(plugin));
     }
 
@@ -543,6 +674,16 @@ elements.updateButton.addEventListener("click", checkForManagerUpdates);
 elements.alertDismiss.addEventListener("click", hideAlert);
 elements.betaToggle.addEventListener("change", (event) => {
   updateBetaReleasesPreference(event.currentTarget.checked);
+});
+elements.releaseHighlightsClose.addEventListener("click", closeReleaseHighlightsDialog);
+elements.releaseHighlightsDialog.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  closeReleaseHighlightsDialog();
+});
+elements.releaseHighlightsDialog.addEventListener("click", (event) => {
+  if (event.target === elements.releaseHighlightsDialog) {
+    closeReleaseHighlightsDialog();
+  }
 });
 
 refreshDashboard();

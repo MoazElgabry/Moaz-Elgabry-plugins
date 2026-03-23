@@ -127,6 +127,34 @@ function parseBooleanMarker(body, markerName) {
   return pattern.test(body);
 }
 
+function extractMarkedBlock(body, startMarker, endMarker) {
+  if (typeof body !== "string" || body.length === 0) {
+    return undefined;
+  }
+
+  const startIndex = body.indexOf(startMarker);
+  if (startIndex < 0) {
+    return undefined;
+  }
+
+  const contentStart = startIndex + startMarker.length;
+  const endIndex = body.indexOf(endMarker, contentStart);
+  if (endIndex < 0) {
+    return undefined;
+  }
+
+  const value = body.slice(contentStart, endIndex).replace(/\r\n/g, "\n").trim();
+  return value.length > 0 ? value : undefined;
+}
+
+function extractReleaseHighlights(body) {
+  return extractMarkedBlock(
+    body,
+    "<!-- manager-highlights:start -->",
+    "<!-- manager-highlights:end -->"
+  );
+}
+
 function sortReleases(releases) {
   return [...releases].sort((left, right) => {
     const leftDate = Date.parse(left.published_at || left.created_at || 0);
@@ -204,6 +232,7 @@ async function buildReleaseFromGitHubRelease(config, release, options = {}) {
     version: parseVersionFromTag(release.tag_name, config),
     releaseDate: release.published_at || release.created_at,
     releaseNotesUrl: release.html_url,
+    releaseHighlights: extractReleaseHighlights(release.body || ""),
     platforms: matchedPackages
   };
 }
@@ -259,6 +288,7 @@ async function generateForConfig(configPath, releasesPath, managerRoot) {
     version: currentStableRelease.version,
     releaseDate: currentStableRelease.releaseDate,
     releaseNotesUrl: currentStableRelease.releaseNotesUrl,
+    releaseHighlights: currentStableRelease.releaseHighlights,
     platforms: currentStableRelease.platforms,
     availableVersions
   };
@@ -274,6 +304,7 @@ async function generateForConfig(configPath, releasesPath, managerRoot) {
       version: currentBetaRelease.version,
       releaseDate: currentBetaRelease.releaseDate,
       releaseNotesUrl: currentBetaRelease.releaseNotesUrl,
+      releaseHighlights: currentBetaRelease.releaseHighlights,
       platforms: currentBetaRelease.platforms,
       availableVersions: []
     };

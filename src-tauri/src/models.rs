@@ -35,6 +35,7 @@ pub struct PluginStatus {
     pub needs_update: bool,
     pub status: String,
     pub release_notes_url: String,
+    pub release_highlights: Option<String>,
     pub available_versions: Vec<VersionOption>,
 }
 
@@ -70,6 +71,7 @@ pub struct PluginManifest {
     pub version: String,
     pub release_date: String,
     pub release_notes_url: String,
+    pub release_highlights: Option<String>,
     pub platforms: Vec<PlatformPackage>,
     #[serde(default)]
     pub available_versions: Vec<PluginRelease>,
@@ -81,6 +83,7 @@ pub struct PluginRelease {
     pub version: String,
     pub release_date: String,
     pub release_notes_url: String,
+    pub release_highlights: Option<String>,
     pub platforms: Vec<PlatformPackage>,
 }
 
@@ -90,6 +93,8 @@ pub struct VersionOption {
     pub version: String,
     pub label: String,
     pub release_date: String,
+    pub release_notes_url: String,
+    pub release_highlights: Option<String>,
     pub is_current_latest: bool,
     pub is_installed: bool,
     pub action_label: String,

@@ -121,6 +121,7 @@ fn build_plugin_status(
         needs_update,
         status,
         release_notes_url: manifest.release_notes_url.clone(),
+        release_highlights: manifest.release_highlights.clone(),
         available_versions,
     }
 }
@@ -189,6 +190,8 @@ fn version_options(manifest: &PluginManifest, installed_version: Option<&str>) -
             version,
             label,
             release_date: release.release_date,
+            release_notes_url: release.release_notes_url,
+            release_highlights: release.release_highlights.clone(),
             is_current_latest,
             is_installed,
             action_label,
@@ -203,6 +206,7 @@ fn collect_releases(manifest: &PluginManifest) -> Vec<PluginRelease> {
         version: manifest.version.clone(),
         release_date: manifest.release_date.clone(),
         release_notes_url: manifest.release_notes_url.clone(),
+        release_highlights: manifest.release_highlights.clone(),
         platforms: manifest.platforms.clone(),
     });
 

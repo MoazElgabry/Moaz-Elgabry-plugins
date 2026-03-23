@@ -390,14 +390,25 @@ async fn load_package_bytes(source: &str) -> Result<Vec<u8>> {
 fn ensure_hosts_closed(host_processes: &[String]) -> Result<()> {
     let system = System::new_all();
     let mut running = Vec::new();
+    let candidates: Vec<String> = host_processes
+        .iter()
+        .map(|candidate| normalize_process_name(candidate))
+        .collect();
 
     for process in system.processes().values() {
-        let process_name = process.name().to_string_lossy().to_lowercase();
-        if host_processes
+        let process_name = process.name().to_string_lossy().to_string();
+        let normalized_name = normalize_process_name(&process_name);
+        let normalized_exe = process
+            .exe()
+            .and_then(|path| path.file_name())
+            .map(|name| normalize_process_name(&name.to_string_lossy()))
+            .unwrap_or_default();
+
+        if candidates
             .iter()
-            .any(|candidate| process_name.contains(&candidate.to_lowercase()))
+            .any(|candidate| *candidate == normalized_name || *candidate == normalized_exe)
         {
-            running.push(process.name().to_string_lossy().to_string());
+            running.push(process_name);
         }
     }
 
@@ -411,6 +422,22 @@ fn ensure_hosts_closed(host_processes: &[String]) -> Result<()> {
         "Close the running host applications before installing: {}",
         running.join(", ")
     )
+}
+
+fn normalize_process_name(value: &str) -> String {
+    let trimmed = value.trim().to_lowercase();
+    let basename = Path::new(&trimmed)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(&trimmed)
+        .to_string();
+
+    basename
+        .strip_suffix(".exe")
+        .or_else(|| basename.strip_suffix(".app"))
+        .unwrap_or(&basename)
+        .trim()
+        .to_string()
 }
 
 fn verify_archive_hash(bytes: &[u8], expected: &str) -> Result<()> {
