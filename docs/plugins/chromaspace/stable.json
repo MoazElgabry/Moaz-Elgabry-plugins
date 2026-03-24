@@ -4,7 +4,7 @@
   "version": "1.0.2",
   "releaseDate": "2026-03-24T00:00:50Z",
   "releaseNotesUrl": "https://github.com/MoazElgabry/Chromaspace/releases/tag/chromaspace-draft-v1.0.2",
-  "releaseHighlights": "-Added a new mode to linearize the image for plotting.\n-Refined sampling weighting for the Neutral Radius.\n-Changed the viewer background colour when the Neutral Radius is used.\n-Expanded the range of point size.",
+  "releaseHighlights": "- Added a new mode to linearize the image for plotting.\n- Refined sampling weighting for the Neutral Radius.\n- Changed the viewer background colour when the Neutral Radius is used.\n- Expanded the range of point size.",
   "platforms": [
     {
       "platform": "windows",
@@ -75,6 +75,7 @@
       "version": "1.0.1",
       "releaseDate": "2026-03-22T22:28:22Z",
       "releaseNotesUrl": "https://github.com/MoazElgabry/Chromaspace/releases/tag/chromaspace-draft-v1.0.1",
+      "releaseHighlights": "- Added a new slider \"Neutral Radius\" to Volume Slice. \nThis masks the extreme saturation areas from the plot \nto give a clearer view of saturation levels more typically found in images.\n- Fixed feedback symbols' position in the 3D viewer when using the Alt modifier",
       "platforms": [
         {
           "platform": "windows",
