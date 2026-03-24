@@ -270,18 +270,46 @@ async fn load_manifest_for_entry(
     entry: &CatalogEntry,
     prefer_beta: bool,
 ) -> Result<PluginManifest> {
+    let stable_manifest = match fetch_json::<PluginManifest>(client, &entry.manifest_url).await {
+        Ok(value) => value,
+        Err(_) => embedded_manifest(&entry.plugin_id)?,
+    };
+
     if prefer_beta {
         if let Some(beta_url) = beta_manifest_url(&entry.manifest_url) {
-            if let Ok(value) = fetch_json::<PluginManifest>(client, &beta_url).await {
-                return Ok(value);
+            if let Ok(beta_manifest) = fetch_json::<PluginManifest>(client, &beta_url).await {
+                return Ok(merge_beta_manifest(stable_manifest, beta_manifest));
             }
         }
     }
 
-    match fetch_json::<PluginManifest>(client, &entry.manifest_url).await {
-        Ok(value) => Ok(value),
-        Err(_) => embedded_manifest(&entry.plugin_id),
+    Ok(stable_manifest)
+}
+
+fn merge_beta_manifest(stable_manifest: PluginManifest, mut beta_manifest: PluginManifest) -> PluginManifest {
+    let mut merged_versions = Vec::with_capacity(1 + stable_manifest.available_versions.len() + beta_manifest.available_versions.len());
+
+    merged_versions.push(PluginRelease {
+        version: stable_manifest.version.clone(),
+        release_date: stable_manifest.release_date.clone(),
+        release_notes_url: stable_manifest.release_notes_url.clone(),
+        release_highlights: stable_manifest.release_highlights.clone(),
+        platforms: stable_manifest.platforms.clone(),
+    });
+
+    for release in stable_manifest
+        .available_versions
+        .into_iter()
+        .chain(beta_manifest.available_versions.into_iter())
+    {
+        if merged_versions.iter().any(|item| item.version == release.version) {
+            continue;
+        }
+        merged_versions.push(release);
     }
+
+    beta_manifest.available_versions = merged_versions;
+    beta_manifest
 }
 
 fn load_local_dev_catalog() -> Result<Option<CatalogBundle>> {

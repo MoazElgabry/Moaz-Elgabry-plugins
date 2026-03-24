@@ -9,52 +9,56 @@
   <body>
     <div id="app">
       <aside class="sidebar">
-        <div class="brand">
-          <div class="brand-mark">ME</div>
-          <div>
-            <h1>Moaz Elgabry Plugins</h1>
+        <div class="sidebar-primary">
+          <div class="brand">
+            <div class="brand-mark">ME</div>
+            <div>
+              <h1>Moaz Elgabry Plugins</h1>
+            </div>
           </div>
-        </div>
 
-        <section class="panel compact">
-          <div class="panel-header">
-            <h2>Manager</h2>
-          </div>
-          <dl class="manager-summary-list">
-            <div class="manager-summary-row">
-              <dt>Version:</dt>
-              <dd id="manager-version">-</dd>
+          <section class="panel compact manager-panel">
+            <div class="panel-header">
+              <h2>Manager</h2>
             </div>
-            <div class="manager-summary-row">
-              <dt>Platform:</dt>
-              <dd id="manager-platform">-</dd>
+            <div class="manager-overview">
+              <dl class="manager-summary-list">
+                <div class="manager-summary-row">
+                  <dt>Version:</dt>
+                  <dd id="manager-version">-</dd>
+                </div>
+                <div class="manager-summary-row">
+                  <dt>Platform:</dt>
+                  <dd id="manager-platform">-</dd>
+                </div>
+              </dl>
+              <div class="button-row manager-action-row">
+                <button id="refresh-button" class="primary">Refresh Plugin Catalog</button>
+                <button id="check-updates-button">Check for Manager Updates</button>
+              </div>
             </div>
-          </dl>
-          <div class="button-row">
-            <button id="refresh-button" class="primary">Refresh Plugin Catalog</button>
-            <button id="check-updates-button">Check for Manager Updates</button>
-          </div>
-          <details class="manager-details">
-            <summary>Manager details</summary>
-            <dl class="summary-grid manager-details-grid">
-              <div>
-                <dt>Catalog</dt>
-                <dd id="catalog-source">-</dd>
-              </div>
-              <div>
-                <dt>Updater</dt>
-                <dd id="updater-status">-</dd>
-              </div>
-            </dl>
-            <label class="toggle-row" for="beta-releases-toggle">
-              <span>
-                <strong>Enable beta releases</strong>
-                <small>Use public beta builds when a plugin provides them.</small>
-              </span>
-              <input id="beta-releases-toggle" type="checkbox" />
-            </label>
-          </details>
-        </section>
+            <details class="manager-details">
+              <summary>Manager details</summary>
+              <dl class="summary-grid manager-details-grid">
+                <div>
+                  <dt>Catalog</dt>
+                  <dd id="catalog-source">-</dd>
+                </div>
+                <div>
+                  <dt>Updater</dt>
+                  <dd id="updater-status">-</dd>
+                </div>
+              </dl>
+              <label class="toggle-row" for="beta-releases-toggle">
+                <span>
+                  <strong>Enable beta releases</strong>
+                  <small>Use public beta builds when a plugin provides them.</small>
+                </span>
+                <input id="beta-releases-toggle" type="checkbox" />
+              </label>
+            </details>
+          </section>
+        </div>
 
         <section class="panel compact">
           <div class="panel-header">
@@ -77,7 +81,7 @@
           <button id="alert-dismiss" class="ghost-button" type="button">Dismiss</button>
         </section>
 
-        <section class="panel">
+        <section class="panel plugins-panel">
           <div class="panel-header">
             <div>
               <h2 class="plugins-title">Plugins</h2>

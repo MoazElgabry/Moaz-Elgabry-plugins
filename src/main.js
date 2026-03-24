@@ -90,6 +90,21 @@ function finishOperation() {
   renderPlugins();
 }
 
+function updateOperationProgress({ label, steps, stepIndex = 0 } = {}) {
+  if (!state.activeOperation) {
+    return;
+  }
+
+  if (label) {
+    state.activeOperation.label = label;
+  }
+  if (steps) {
+    state.activeOperation.steps = steps;
+  }
+  state.activeOperation.stepIndex = Math.max(0, Math.min(stepIndex, state.activeOperation.steps.length - 1));
+  renderPlugins();
+}
+
 function parseUiError(error, fallbackSummary = "The operation failed.") {
   const raw = typeof error === "string" ? error : String(error);
 
@@ -415,10 +430,6 @@ function renderVersionDrawer(plugin) {
       <span class="version-drawer-icon" aria-hidden="true"></span>
     </summary>
     <div class="version-tools">
-      <div class="version-tools-copy">
-        <p class="eyebrow">Selective version install</p>
-        <p class="subtle">Choose a different version when a project needs an older match.</p>
-      </div>
       <div class="version-picker-row">
         <label class="version-picker">
           <span>Choose a version</span>
@@ -609,6 +620,42 @@ async function refreshDashboard() {
   }
 }
 
+function shouldAutoCheckManagerUpdateForPluginAction(action) {
+  return ["install", "update", "reinstall", "install-selected"].includes(action);
+}
+
+function managerUpdateCheckOptions() {
+  return state.dashboard?.manager?.platform === "macos"
+    ? { target: "darwin-universal" }
+    : undefined;
+}
+
+async function runManagerUpdateCheck({ silent = false } = {}) {
+  if (!state.dashboard?.manager?.updaterConfigured) {
+    return { updated: false, error: null, skipped: true };
+  }
+
+  try {
+    const update = await check(managerUpdateCheckOptions());
+    if (!update) {
+      return { updated: false, error: null, skipped: false };
+    }
+
+    if (!silent) {
+      logActivity(`Downloading manager update ${update.version}.`);
+    }
+    await update.downloadAndInstall();
+    if (!silent) {
+      logActivity("Manager update installed. Restarting...");
+    }
+    await relaunch();
+    return { updated: true, error: null, skipped: false };
+  } catch (error) {
+    const parsed = parseUiError(error, "Manager update failed.");
+    return { updated: false, error: parsed, skipped: false };
+  }
+}
+
 async function applyPluginAction(pluginId, action, targetVersion = null) {
   const activeLabel =
     action === "install-selected"
@@ -616,15 +663,40 @@ async function applyPluginAction(pluginId, action, targetVersion = null) {
       : action === "uninstall"
         ? "Uninstalling plugin"
         : action === "force-uninstall"
-          ? "Force uninstalling plugin"
+        ? "Force uninstalling plugin"
           : `${action.replace("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase())} in progress`;
   startOperation(action.includes("uninstall") ? "plugin-uninstall" : "plugin", pluginId, activeLabel);
   setBusy(true);
+  let deferredManagerUpdateError = null;
   try {
     hideAlert();
+    if (shouldAutoCheckManagerUpdateForPluginAction(action)) {
+      logActivity(`Checking for manager updates before ${action.replace("-", " ")}.`);
+      updateOperationProgress({
+        label: "Checking manager updates first",
+        steps: ["Checking for manager updates", "Continuing with plugin install"],
+        stepIndex: 0
+      });
+      const managerUpdate = await runManagerUpdateCheck();
+      if (managerUpdate.error) {
+        deferredManagerUpdateError = managerUpdate.error;
+        logActivity(
+          `Manager auto-update skipped before ${action.replace("-", " ")}: ${managerUpdate.error.summary}`
+        );
+      }
+      updateOperationProgress({
+        label: activeLabel,
+        steps: operationSteps(action.includes("uninstall") ? "plugin-uninstall" : "plugin"),
+        stepIndex: 0
+      });
+    }
+
     const result = await invoke("apply_plugin_action", { pluginId, action, targetVersion });
     logActivity(`${result.pluginId}: ${result.message}`);
     await refreshDashboard();
+    if (deferredManagerUpdateError) {
+      showAlert(deferredManagerUpdateError);
+    }
   } catch (error) {
     const parsed = parseUiError(error, `Couldn't complete the ${action.replace("-", " ")} action for ${pluginId}.`);
     showAlert(parsed);
@@ -645,24 +717,15 @@ async function checkForManagerUpdates() {
   startOperation("manager-update", null, "Updating manager");
   setBusy(true);
   try {
-    const update = await check(
-      state.dashboard?.manager?.platform === "macos"
-        ? { target: "darwin-universal" }
-        : undefined
-    );
-    if (!update) {
+    const outcome = await runManagerUpdateCheck();
+    if (!outcome.updated && !outcome.error) {
       logActivity("Manager app is already up to date.");
       return;
     }
-
-    logActivity(`Downloading manager update ${update.version}.`);
-    await update.downloadAndInstall();
-    logActivity("Manager update installed. Restarting...");
-    await relaunch();
-  } catch (error) {
-    const parsed = parseUiError(error, "Manager update failed.");
-    showAlert(parsed);
-    logActivity(`Manager update failed: ${parsed.summary}`);
+    if (outcome.error) {
+      showAlert(outcome.error);
+      logActivity(`Manager update failed: ${outcome.error.summary}`);
+    }
   } finally {
     finishOperation();
     setBusy(false);
