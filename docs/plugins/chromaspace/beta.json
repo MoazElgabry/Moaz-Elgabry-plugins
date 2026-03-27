@@ -1,15 +1,16 @@
 {
   "pluginId": "chromaspace",
   "displayName": "Chromaspace",
-  "version": "1.0.0b",
-  "releaseDate": "2026-03-20T20:52:23Z",
-  "releaseNotesUrl": "https://github.com/MoazElgabry/Chromaspace/releases/tag/v1.0.0b",
+  "version": "1.0.3Beta",
+  "releaseDate": "2026-03-27T00:08:02Z",
+  "releaseNotesUrl": "https://github.com/MoazElgabry/Chromaspace/releases/tag/chromaspace-draft-v1.0.3Beta",
+  "releaseHighlights": "-Enables full GPU-acceleration tested on Cuda systems to gain up to 3.9x performance.",
   "platforms": [
     {
       "platform": "windows",
       "arch": "x86_64",
-      "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/v1.0.0b/Chromaspace_v1.0.0b_Windows_portable.zip",
-      "sha256": "20e5aeeab2314620ca7f9350992bba9f564b027cf0d365c9f2a266212edae0b9",
+      "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/chromaspace-draft-v1.0.3Beta/Chromaspace_v1.0.3Beta_windows_x86_64_portable.zip",
+      "sha256": "1b5ec9fd5d844fe2989b4656c6caf7bc3eb082f23266af7d51f70652775b1667",
       "packageType": "zip",
       "bundleName": "Chromaspace.ofx.bundle",
       "bundleIdentifier": "com.moazelgabry.Chromaspace",
@@ -29,8 +30,8 @@
     {
       "platform": "macos",
       "arch": "universal",
-      "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/v1.0.0b/Chromaspace_v1.0.0b_macOS_universal_portable.zip",
-      "sha256": "5fe3b06da616cc4e6f7dc4078f1eb135e818606ab4cafdc8e95ffef7ac0a17ef",
+      "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/chromaspace-draft-v1.0.3Beta/Chromaspace_v1.0.3Beta_macOS_universal_portable.zip",
+      "sha256": "b6832d36b8b5e827063ace7f38ea89c71d0771dd0769d3f36a2df68546fb18aa",
       "packageType": "zip",
       "bundleName": "Chromaspace.ofx.bundle",
       "bundleIdentifier": "com.moazelgabry.Chromaspace",
@@ -50,8 +51,8 @@
     {
       "platform": "linux",
       "arch": "x86_64",
-      "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/v1.0.0b/Chromaspace_v1.0.0b_linux_portable.tar.gz",
-      "sha256": "f0a7524afccd2d56e36a0d671ac52222113e3853a0ab35c58f8e7bfb6613c8bd",
+      "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/chromaspace-draft-v1.0.3Beta/Chromaspace_v1.0.3Beta_linux_x86_64_cuda_opencl_cpu_portable.tar.gz",
+      "sha256": "7bda364f62ad54797765b40b5b6aa3730ea1ec9903ea84362809d0930a39d5b1",
       "packageType": "tar.gz",
       "bundleName": "Chromaspace.ofx.bundle",
       "bundleIdentifier": "com.moazelgabry.Chromaspace",
