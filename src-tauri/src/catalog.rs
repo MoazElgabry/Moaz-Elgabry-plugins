@@ -92,6 +92,12 @@ fn build_plugin_status(
         .map(|item| item.installed_version.clone())
         .or_else(|| record.map(|item| item.installed_version.clone()));
     let managed_install = stamp.is_some() || record.is_some();
+    let channel_switch_available = installed
+        && managed_install
+        && installed_version
+            .as_ref()
+            .map(|current| version_cmp(current, &manifest.version) == Ordering::Greater)
+            .unwrap_or(false);
     let needs_update = installed
         && installed_version
             .as_ref()
@@ -101,6 +107,8 @@ fn build_plugin_status(
 
     let status = if !installed {
         "Ready to install".to_string()
+    } else if channel_switch_available {
+        "Stable available".to_string()
     } else if needs_update {
         "Update available".to_string()
     } else if managed_install {
@@ -119,6 +127,7 @@ fn build_plugin_status(
         installed,
         managed_install,
         needs_update,
+        channel_switch_available,
         status,
         release_notes_url: manifest.release_notes_url.clone(),
         release_highlights: manifest.release_highlights.clone(),
@@ -162,6 +171,9 @@ fn version_options(manifest: &PluginManifest, installed_version: Option<&str>) -
     let mut releases = collect_releases(manifest);
     releases.retain(|release| select_package(&release.platforms).is_ok());
     releases.sort_by(|left, right| version_cmp(&right.version, &left.version));
+    let installed_newer_than_target = installed_version
+        .map(|current| version_cmp(current, &manifest.version) == Ordering::Greater)
+        .unwrap_or(false);
 
     let mut options = Vec::new();
     for release in releases {
@@ -179,6 +191,8 @@ fn version_options(manifest: &PluginManifest, installed_version: Option<&str>) -
         };
         let action_label = match installed_version {
             Some(current) if current == version => "Reinstall this version".to_string(),
+            Some(_) if installed_newer_than_target && is_current_latest => "Return to stable".to_string(),
+            Some(_) if installed_newer_than_target => "Install selected version".to_string(),
             Some(current) => match version_cmp(&version, current) {
                 Ordering::Greater => "Install selected upgrade".to_string(),
                 Ordering::Less => "Roll back to selected".to_string(),

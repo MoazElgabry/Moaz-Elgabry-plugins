@@ -35,6 +35,28 @@ jobs:
         with:
           node-version: lts/*
 
+      - name: Generate plugin channel manifests from latest plugin releases
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p tmp/releases
+          curl -fsSL \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            "https://api.github.com/repos/MoazElgabry/Chromaspace/releases?per_page=100" \
+            -o tmp/releases/chromaspace-releases.json
+          curl -fsSL \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            "https://api.github.com/repos/MoazElgabry/ME_OpenDRT-OFX/releases?per_page=100" \
+            -o tmp/releases/me-opendrt-releases.json
+          node tools/generate-plugin-channel-manifests.mjs \
+            --manager-root "$GITHUB_WORKSPACE" \
+            --config "$GITHUB_WORKSPACE/../Chromaspace/manager-release-config.json" \
+            --releases-json "$GITHUB_WORKSPACE/tmp/releases/chromaspace-releases.json" \
+            --config "$GITHUB_WORKSPACE/../ME_OFX/manager-release-config.json" \
+            --releases-json "$GITHUB_WORKSPACE/tmp/releases/me-opendrt-releases.json"
+
       - name: Prepare Pages content
         run: |
           rm -rf pages-dist

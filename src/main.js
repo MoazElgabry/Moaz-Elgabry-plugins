@@ -237,14 +237,22 @@ function closeReleaseHighlightsDialog() {
 
 function statusClass(status) {
   if (status === "Installed" || status === "Up to date") return "ok";
-  if (status === "Update available" || status === "Unmanaged install") return "warn";
+  if (status === "Update available" || status === "Stable available" || status === "Unmanaged install") return "warn";
   return "bad";
 }
 
 function actionLabel(plugin) {
   if (!plugin.installed) return "Install";
+  if (plugin.channelSwitchAvailable) return "Install stable";
   if (plugin.needsUpdate) return "Update";
   return "Reinstall";
+}
+
+function actionRequest(plugin) {
+  if (!plugin.installed) return "install";
+  if (plugin.channelSwitchAvailable) return "update";
+  if (plugin.needsUpdate) return "update";
+  return "reinstall";
 }
 
 function rollbackButtonLabel(plugin, selectedVersion) {
@@ -265,6 +273,14 @@ function selectedVersionHint(plugin, selectedVersion) {
 
   if (selected.version === plugin.installedVersion) {
     return `This reinstalls the currently detected version (${selected.version}).`;
+  }
+
+  if (plugin.channelSwitchAvailable) {
+    if (selected.isCurrentLatest) {
+      return `This installs the latest stable release (${selected.version}) and moves ${plugin.displayName} off the current beta build (${plugin.installedVersion}).`;
+    }
+
+    return `This installs ${selected.version} instead of the current beta build (${plugin.installedVersion}).`;
   }
 
   if (selected.isCurrentLatest) {
@@ -323,6 +339,7 @@ function primaryActionClass(label) {
 }
 
 function actionHelperText(primaryLabel) {
+  if (primaryLabel === "Install stable") return "Leave beta and install the latest stable release.";
   if (primaryLabel === "Update") return "Install the latest release.";
   if (primaryLabel === "Reinstall") return "Reinstall the current version.";
   return "";
@@ -501,6 +518,7 @@ function renderPlugins() {
     const installedVersion = plugin.installedVersion ?? (plugin.installed ? "Unknown" : "Not installed");
     const managedBadge = plugin.managedInstall ? "Managed install" : "Detected install";
     const primaryLabel = actionLabel(plugin);
+    const primaryRequest = actionRequest(plugin);
     const helperText = actionHelperText(primaryLabel);
     const showLatestInfo = hasReleaseHighlights(plugin.releaseHighlights);
     card.innerHTML = `
@@ -534,7 +552,7 @@ function renderPlugins() {
       </dl>
 
       <div class="plugin-actions">
-        <button type="button" class="${primaryActionClass(primaryLabel)}" data-plugin-id="${plugin.pluginId}" data-action="apply">${primaryLabel}</button>
+        <button type="button" class="${primaryActionClass(primaryLabel)}" data-plugin-id="${plugin.pluginId}" data-action="${primaryRequest}">${primaryLabel}</button>
         ${
           helperText
             ? `<p class="action-helper">${helperText}</p>`
@@ -545,9 +563,9 @@ function renderPlugins() {
       ${pluginOperationMarkup(plugin)}
     `;
 
-    const button = card.querySelector('[data-action="apply"]');
+    const button = card.querySelector(`[data-action="${primaryRequest}"]`);
     button.addEventListener("click", async () => {
-      await applyPluginAction(plugin.pluginId, primaryLabel.toLowerCase());
+      await applyPluginAction(plugin.pluginId, primaryRequest);
     });
     const infoButton = card.querySelector(".main-action-info-button");
     if (infoButton) {
