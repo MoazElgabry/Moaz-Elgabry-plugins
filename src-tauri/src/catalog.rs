@@ -6,7 +6,6 @@ use crate::models::{
 use crate::settings;
 use anyhow::{anyhow, Context, Result};
 use reqwest::Client;
-use semver::Version;
 use serde::de::DeserializeOwned;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -92,12 +91,22 @@ fn build_plugin_status(
         .map(|item| item.installed_version.clone())
         .or_else(|| record.map(|item| item.installed_version.clone()));
     let managed_install = stamp.is_some() || record.is_some();
-    let channel_switch_available = installed
-        && managed_install
-        && installed_version
-            .as_ref()
-            .map(|current| version_cmp(current, &manifest.version) == Ordering::Greater)
-            .unwrap_or(false);
+    let channel_switch_mode = if installed && managed_install {
+        installed_version.as_ref().and_then(|current| {
+            if !is_prerelease_like(current) {
+                return None;
+            }
+
+            match version_cmp(current, &manifest.version) {
+                Ordering::Greater => Some("return_to_stable".to_string()),
+                Ordering::Less => Some("stable_update_available".to_string()),
+                Ordering::Equal => Some("stable_update_available".to_string()),
+            }
+        })
+    } else {
+        None
+    };
+    let channel_switch_available = channel_switch_mode.is_some();
     let needs_update = installed
         && installed_version
             .as_ref()
@@ -107,8 +116,10 @@ fn build_plugin_status(
 
     let status = if !installed {
         "Ready to install".to_string()
-    } else if channel_switch_available {
-        "Stable available".to_string()
+    } else if channel_switch_mode.as_deref() == Some("stable_update_available") {
+        "Stable update available".to_string()
+    } else if channel_switch_mode.as_deref() == Some("return_to_stable") {
+        "Beta installed".to_string()
     } else if needs_update {
         "Update available".to_string()
     } else if managed_install {
@@ -128,6 +139,7 @@ fn build_plugin_status(
         managed_install,
         needs_update,
         channel_switch_available,
+        channel_switch_mode,
         status,
         release_notes_url: manifest.release_notes_url.clone(),
         release_highlights: manifest.release_highlights.clone(),
@@ -136,9 +148,11 @@ fn build_plugin_status(
 }
 
 fn version_cmp(left: &str, right: &str) -> Ordering {
-    match (Version::parse(left), Version::parse(right)) {
-        (Ok(left), Ok(right)) => left.cmp(&right),
-        _ => left.cmp(right),
+    match (parse_loose_version(left), parse_loose_version(right)) {
+        (Some(left), Some(right)) => compare_loose_versions(&left, &right),
+        (Some(_), None) => Ordering::Greater,
+        (None, Some(_)) => Ordering::Less,
+        (None, None) => left.cmp(right),
     }
 }
 
@@ -174,6 +188,7 @@ fn version_options(manifest: &PluginManifest, installed_version: Option<&str>) -
     let installed_newer_than_target = installed_version
         .map(|current| version_cmp(current, &manifest.version) == Ordering::Greater)
         .unwrap_or(false);
+    let installed_is_prerelease = installed_version.map(is_prerelease_like).unwrap_or(false);
 
     let mut options = Vec::new();
     for release in releases {
@@ -191,6 +206,11 @@ fn version_options(manifest: &PluginManifest, installed_version: Option<&str>) -
         };
         let action_label = match installed_version {
             Some(current) if current == version => "Reinstall this version".to_string(),
+            Some(current) if installed_is_prerelease && is_current_latest => match version_cmp(&version, current) {
+                Ordering::Greater | Ordering::Equal => "Install latest stable".to_string(),
+                Ordering::Less => "Return to stable".to_string(),
+            },
+            Some(_) if installed_is_prerelease => "Install selected stable".to_string(),
             Some(_) if installed_newer_than_target && is_current_latest => "Return to stable".to_string(),
             Some(_) if installed_newer_than_target => "Install selected version".to_string(),
             Some(current) => match version_cmp(&version, current) {
@@ -212,6 +232,144 @@ fn version_options(manifest: &PluginManifest, installed_version: Option<&str>) -
         });
     }
     options
+}
+
+fn is_prerelease_like(version: &str) -> bool {
+    if let Some(parsed) = parse_loose_version(version) {
+        return parsed.prerelease.is_some();
+    }
+
+    let lowered = version.to_ascii_lowercase();
+    ["beta", "alpha", "preview", "rc", "pre"]
+        .iter()
+        .any(|token| lowered.contains(token))
+}
+
+#[derive(Debug, Clone)]
+struct LooseVersion {
+    core: Vec<u64>,
+    prerelease: Option<LoosePrerelease>,
+}
+
+#[derive(Debug, Clone)]
+struct LoosePrerelease {
+    label_rank: u8,
+    label: String,
+    number: Option<u64>,
+}
+
+fn parse_loose_version(raw: &str) -> Option<LooseVersion> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let mut numeric_parts = Vec::new();
+    let mut current = String::new();
+    let mut prerelease_start = None;
+    let chars: Vec<char> = trimmed.chars().collect();
+
+    for (index, ch) in chars.iter().enumerate() {
+        if ch.is_ascii_digit() {
+            current.push(*ch);
+            continue;
+        }
+
+        if *ch == '.' {
+            if current.is_empty() {
+                return None;
+            }
+            numeric_parts.push(current.parse::<u64>().ok()?);
+            current.clear();
+            continue;
+        }
+
+        prerelease_start = Some(index);
+        break;
+    }
+
+    if !current.is_empty() {
+        numeric_parts.push(current.parse::<u64>().ok()?);
+    }
+
+    if numeric_parts.is_empty() {
+        return None;
+    }
+
+    while numeric_parts.len() < 3 {
+        numeric_parts.push(0);
+    }
+
+    let prerelease = prerelease_start
+        .and_then(|index| parse_prerelease_fragment(&trimmed[index..]));
+
+    Some(LooseVersion {
+        core: numeric_parts,
+        prerelease,
+    })
+}
+
+fn parse_prerelease_fragment(raw: &str) -> Option<LoosePrerelease> {
+    let normalized = raw
+        .trim()
+        .trim_start_matches(['-', '_', '.', ' '])
+        .to_ascii_lowercase();
+    if normalized.is_empty() {
+        return None;
+    }
+
+    let split_index = normalized
+        .find(|ch: char| ch.is_ascii_digit())
+        .unwrap_or(normalized.len());
+    let label = normalized[..split_index].trim_matches(['-', '_', '.', ' ']).to_string();
+    let number = normalized[split_index..]
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>();
+
+    let label_rank = match label.as_str() {
+        "alpha" => 0,
+        "beta" => 1,
+        "preview" => 2,
+        "pre" => 3,
+        "rc" => 4,
+        _ => 5,
+    };
+
+    Some(LoosePrerelease {
+        label_rank,
+        label,
+        number: if number.is_empty() {
+            None
+        } else {
+            number.parse::<u64>().ok()
+        },
+    })
+}
+
+fn compare_loose_versions(left: &LooseVersion, right: &LooseVersion) -> Ordering {
+    let core_len = left.core.len().max(right.core.len());
+    for index in 0..core_len {
+        let left_part = *left.core.get(index).unwrap_or(&0);
+        let right_part = *right.core.get(index).unwrap_or(&0);
+        match left_part.cmp(&right_part) {
+            Ordering::Equal => {}
+            ordering => return ordering,
+        }
+    }
+
+    match (&left.prerelease, &right.prerelease) {
+        (None, None) => Ordering::Equal,
+        (None, Some(_)) => Ordering::Greater,
+        (Some(_), None) => Ordering::Less,
+        (Some(left_pre), Some(right_pre)) => match left_pre.label_rank.cmp(&right_pre.label_rank) {
+            Ordering::Equal => match left_pre.label.cmp(&right_pre.label) {
+                Ordering::Equal => left_pre.number.unwrap_or(0).cmp(&right_pre.number.unwrap_or(0)),
+                ordering => ordering,
+            },
+            ordering => ordering,
+        },
+    }
 }
 
 fn collect_releases(manifest: &PluginManifest) -> Vec<PluginRelease> {

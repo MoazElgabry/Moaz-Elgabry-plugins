@@ -237,13 +237,22 @@ function closeReleaseHighlightsDialog() {
 
 function statusClass(status) {
   if (status === "Installed" || status === "Up to date") return "ok";
-  if (status === "Update available" || status === "Stable available" || status === "Unmanaged install") return "warn";
+  if (
+    status === "Update available" ||
+    status === "Stable available" ||
+    status === "Stable update available" ||
+    status === "Beta installed" ||
+    status === "Unmanaged install"
+  ) {
+    return "warn";
+  }
   return "bad";
 }
 
 function actionLabel(plugin) {
   if (!plugin.installed) return "Install";
-  if (plugin.channelSwitchAvailable) return "Install stable";
+  if (plugin.channelSwitchMode === "stable_update_available") return "Update to stable";
+  if (plugin.channelSwitchMode === "return_to_stable") return "Install stable";
   if (plugin.needsUpdate) return "Update";
   return "Reinstall";
 }
@@ -275,7 +284,15 @@ function selectedVersionHint(plugin, selectedVersion) {
     return `This reinstalls the currently detected version (${selected.version}).`;
   }
 
-  if (plugin.channelSwitchAvailable) {
+  if (plugin.channelSwitchMode === "stable_update_available") {
+    if (selected.isCurrentLatest) {
+      return `This installs the newly released stable version (${selected.version}) over the current beta build (${plugin.installedVersion}).`;
+    }
+
+    return `This installs stable version ${selected.version} instead of the current beta build (${plugin.installedVersion}).`;
+  }
+
+  if (plugin.channelSwitchMode === "return_to_stable") {
     if (selected.isCurrentLatest) {
       return `This installs the latest stable release (${selected.version}) and moves ${plugin.displayName} off the current beta build (${plugin.installedVersion}).`;
     }
@@ -339,6 +356,7 @@ function primaryActionClass(label) {
 }
 
 function actionHelperText(primaryLabel) {
+  if (primaryLabel === "Update to stable") return "Install the newly released stable version.";
   if (primaryLabel === "Install stable") return "Leave beta and install the latest stable release.";
   if (primaryLabel === "Update") return "Install the latest release.";
   if (primaryLabel === "Reinstall") return "Reinstall the current version.";
@@ -436,6 +454,8 @@ function pluginIconMarkup(plugin) {
 
 function renderVersionDrawer(plugin) {
   const initialVersion = plugin.installedVersion ?? plugin.availableVersions[0]?.version ?? "";
+  const initialSelected = findVersionOption(plugin, initialVersion);
+  const showInitialInfo = hasReleaseHighlights(initialSelected?.releaseHighlights);
   const wrapper = document.createElement("details");
   wrapper.className = "version-drawer";
   wrapper.innerHTML = `
@@ -461,7 +481,7 @@ function renderVersionDrawer(plugin) {
         </label>
         <div class="version-picker-actions">
           <button type="button" data-plugin-id="${plugin.pluginId}" data-action="install-selected">Install selected</button>
-          ${releaseInfoButtonMarkup("rollback-info-button")}
+          ${showInitialInfo ? releaseInfoButtonMarkup("rollback-info-button") : ""}
         </div>
       </div>
       <p class="version-hint"></p>
@@ -470,14 +490,34 @@ function renderVersionDrawer(plugin) {
 
   const select = wrapper.querySelector("select");
   const installSelectedButton = wrapper.querySelector('[data-action="install-selected"]');
-  const infoButton = wrapper.querySelector(".rollback-info-button");
   const hint = wrapper.querySelector(".version-hint");
 
   const refreshCopy = () => {
     const selected = findVersionOption(plugin, select.value);
     installSelectedButton.textContent = rollbackButtonLabel(plugin, select.value);
     hint.textContent = selectedVersionHint(plugin, select.value);
-    infoButton.hidden = !hasReleaseHighlights(selected?.releaseHighlights);
+    const actions = wrapper.querySelector(".version-picker-actions");
+    let infoButton = actions.querySelector(".rollback-info-button");
+    const shouldShowInfo = hasReleaseHighlights(selected?.releaseHighlights);
+
+    if (shouldShowInfo && !infoButton) {
+      actions.insertAdjacentHTML("beforeend", releaseInfoButtonMarkup("rollback-info-button"));
+      infoButton = actions.querySelector(".rollback-info-button");
+      infoButton.addEventListener("click", () => {
+        const selectedVersion = findVersionOption(plugin, select.value);
+        if (!selectedVersion || !hasReleaseHighlights(selectedVersion.releaseHighlights)) {
+          return;
+        }
+        openReleaseHighlightsDialog({
+          pluginName: plugin.displayName,
+          version: selectedVersion.version,
+          releaseNotesUrl: selectedVersion.releaseNotesUrl,
+          releaseHighlights: selectedVersion.releaseHighlights
+        });
+      });
+    } else if (!shouldShowInfo && infoButton) {
+      infoButton.remove();
+    }
   };
 
   refreshCopy();
@@ -485,18 +525,6 @@ function renderVersionDrawer(plugin) {
   select.addEventListener("change", refreshCopy);
   installSelectedButton.addEventListener("click", async () => {
     await applyPluginAction(plugin.pluginId, "install-selected", select.value);
-  });
-  infoButton.addEventListener("click", () => {
-    const selected = findVersionOption(plugin, select.value);
-    if (!selected || !hasReleaseHighlights(selected.releaseHighlights)) {
-      return;
-    }
-    openReleaseHighlightsDialog({
-      pluginName: plugin.displayName,
-      version: selected.version,
-      releaseNotesUrl: selected.releaseNotesUrl,
-      releaseHighlights: selected.releaseHighlights
-    });
   });
 
   return wrapper;
