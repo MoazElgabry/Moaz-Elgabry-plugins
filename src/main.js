@@ -242,6 +242,7 @@ function statusClass(status) {
     status === "Stable available" ||
     status === "Stable update available" ||
     status === "Beta installed" ||
+    status === "Catalog behind" ||
     status === "Unmanaged install"
   ) {
     return "warn";
@@ -253,6 +254,7 @@ function actionLabel(plugin) {
   if (!plugin.installed) return "Install";
   if (plugin.channelSwitchMode === "stable_update_available") return "Update to stable";
   if (plugin.channelSwitchMode === "return_to_stable") return "Install stable";
+  if (plugin.catalogBehindInstalled) return "Reinstall";
   if (plugin.needsUpdate) return "Update";
   return "Reinstall";
 }
@@ -355,7 +357,10 @@ function primaryActionClass(label) {
   return label === "Reinstall" ? "plugin-secondary-action" : "primary plugin-primary-action";
 }
 
-function actionHelperText(primaryLabel) {
+function actionHelperText(plugin, primaryLabel) {
+  if (plugin.catalogBehindInstalled) {
+    return `The catalog currently lists ${plugin.latestVersion}, but the detected installed version (${plugin.installedVersion}) is newer. Refresh the catalog if this looks wrong.`;
+  }
   if (primaryLabel === "Update to stable") return "Install the newly released stable version.";
   if (primaryLabel === "Install stable") return "Leave beta and install the latest stable release.";
   if (primaryLabel === "Update") return "Install the latest release.";
@@ -547,7 +552,7 @@ function renderPlugins() {
     const managedBadge = plugin.managedInstall ? "Managed install" : "Detected install";
     const primaryLabel = actionLabel(plugin);
     const primaryRequest = actionRequest(plugin);
-    const helperText = actionHelperText(primaryLabel);
+    const helperText = actionHelperText(plugin, primaryLabel);
     const showLatestInfo = hasReleaseHighlights(plugin.releaseHighlights);
     card.innerHTML = `
       <header>

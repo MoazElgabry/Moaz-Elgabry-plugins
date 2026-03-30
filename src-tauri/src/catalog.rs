@@ -91,22 +91,33 @@ fn build_plugin_status(
         .map(|item| item.installed_version.clone())
         .or_else(|| record.map(|item| item.installed_version.clone()));
     let managed_install = stamp.is_some() || record.is_some();
+    let installed_is_prerelease = installed_version
+        .as_ref()
+        .map(|current| is_prerelease_like(current))
+        .unwrap_or(false);
+    let installed_newer_than_manifest = installed
+        && managed_install
+        && installed_version
+            .as_ref()
+            .map(|current| version_cmp(current, &manifest.version) == Ordering::Greater)
+            .unwrap_or(false);
     let channel_switch_mode = if installed && managed_install {
         installed_version.as_ref().and_then(|current| {
-            if !is_prerelease_like(current) {
+            if !installed_is_prerelease {
                 return None;
             }
 
             match version_cmp(current, &manifest.version) {
                 Ordering::Greater => Some("return_to_stable".to_string()),
                 Ordering::Less => Some("stable_update_available".to_string()),
-                Ordering::Equal => Some("stable_update_available".to_string()),
+                Ordering::Equal => Some("return_to_stable".to_string()),
             }
         })
     } else {
         None
     };
     let channel_switch_available = channel_switch_mode.is_some();
+    let catalog_behind_installed = installed_newer_than_manifest && !installed_is_prerelease;
     let needs_update = installed
         && installed_version
             .as_ref()
@@ -120,6 +131,8 @@ fn build_plugin_status(
         "Stable update available".to_string()
     } else if channel_switch_mode.as_deref() == Some("return_to_stable") {
         "Beta installed".to_string()
+    } else if catalog_behind_installed {
+        "Catalog behind".to_string()
     } else if needs_update {
         "Update available".to_string()
     } else if managed_install {
@@ -140,6 +153,7 @@ fn build_plugin_status(
         needs_update,
         channel_switch_available,
         channel_switch_mode,
+        catalog_behind_installed,
         status,
         release_notes_url: manifest.release_notes_url.clone(),
         release_highlights: manifest.release_highlights.clone(),

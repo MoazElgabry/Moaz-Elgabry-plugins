@@ -35,6 +35,7 @@ pub struct PluginStatus {
     pub needs_update: bool,
     pub channel_switch_available: bool,
     pub channel_switch_mode: Option<String>,
+    pub catalog_behind_installed: bool,
     pub status: String,
     pub release_notes_url: String,
     pub release_highlights: Option<String>,
