@@ -1,7 +1,7 @@
 use crate::installer;
 use crate::models::{
-    CatalogEntry, DashboardState, ManagerSummary, PlatformPackage, PluginCatalogIndex, PluginManifest,
-    PluginRelease, PluginStatus, ResolvedPlugin, VersionOption,
+    CatalogEntry, DashboardState, ManagerSummary, PlatformPackage, PluginCatalogIndex,
+    PluginManifest, PluginRelease, PluginStatus, ResolvedPlugin, VersionOption,
 };
 use crate::settings;
 use anyhow::{anyhow, Context, Result};
@@ -46,7 +46,12 @@ pub async fn build_dashboard_state() -> Result<DashboardState> {
         .filter_map(|entry| {
             let manifest = bundle.manifests.get(&entry.plugin_id)?;
             let package = select_package(&manifest.platforms).ok()?;
-            Some(build_plugin_status(entry, manifest, package, &install_state))
+            Some(build_plugin_status(
+                entry,
+                manifest,
+                package,
+                &install_state,
+            ))
         })
         .collect::<Vec<_>>();
 
@@ -57,7 +62,10 @@ pub async fn build_dashboard_state() -> Result<DashboardState> {
     })
 }
 
-pub async fn resolve_plugin(plugin_id: &str, requested_version: Option<&str>) -> Result<ResolvedPlugin> {
+pub async fn resolve_plugin(
+    plugin_id: &str,
+    requested_version: Option<&str>,
+) -> Result<ResolvedPlugin> {
     let app_settings = settings::load_settings()?;
     let bundle = load_catalog_bundle(app_settings.beta_releases_enabled).await?;
     let manifest = bundle
@@ -85,7 +93,9 @@ fn build_plugin_status(
     let installed = target_bundle.exists();
     let install_key = installer::install_key(&entry.plugin_id, &target_bundle);
     let record = install_state.installs.get(&install_key);
-    let stamp = installer::read_bundle_install_stamp(&target_bundle).ok().flatten();
+    let stamp = installer::read_bundle_install_stamp(&target_bundle)
+        .ok()
+        .flatten();
     let installed_version = stamp
         .as_ref()
         .map(|item| item.installed_version.clone())
@@ -102,17 +112,8 @@ fn build_plugin_status(
             .map(|current| version_cmp(current, &manifest.version) == Ordering::Greater)
             .unwrap_or(false);
     let channel_switch_mode = if installed && managed_install {
-        installed_version.as_ref().and_then(|current| {
-            if !installed_is_prerelease {
-                return None;
-            }
-
-            match version_cmp(current, &manifest.version) {
-                Ordering::Greater => Some("return_to_stable".to_string()),
-                Ordering::Less => Some("stable_update_available".to_string()),
-                Ordering::Equal => Some("return_to_stable".to_string()),
-            }
-        })
+        determine_channel_switch_mode(installed_version.as_deref(), &manifest.version)
+            .map(str::to_string)
     } else {
         None
     };
@@ -195,14 +196,13 @@ pub fn select_package(packages: &[PlatformPackage]) -> Result<PlatformPackage> {
         .ok_or_else(|| anyhow!("No supported package found for {} / {}", platform, arch))
 }
 
-fn version_options(manifest: &PluginManifest, installed_version: Option<&str>) -> Vec<VersionOption> {
+fn version_options(
+    manifest: &PluginManifest,
+    installed_version: Option<&str>,
+) -> Vec<VersionOption> {
     let mut releases = collect_releases(manifest);
     releases.retain(|release| select_package(&release.platforms).is_ok());
     releases.sort_by(|left, right| version_cmp(&right.version, &left.version));
-    let installed_newer_than_target = installed_version
-        .map(|current| version_cmp(current, &manifest.version) == Ordering::Greater)
-        .unwrap_or(false);
-    let installed_is_prerelease = installed_version.map(is_prerelease_like).unwrap_or(false);
 
     let mut options = Vec::new();
     for release in releases {
@@ -218,22 +218,12 @@ fn version_options(manifest: &PluginManifest, installed_version: Option<&str>) -
         } else {
             version.clone()
         };
-        let action_label = match installed_version {
-            Some(current) if current == version => "Reinstall this version".to_string(),
-            Some(current) if installed_is_prerelease && is_current_latest => match version_cmp(&version, current) {
-                Ordering::Greater | Ordering::Equal => "Install latest stable".to_string(),
-                Ordering::Less => "Return to stable".to_string(),
-            },
-            Some(_) if installed_is_prerelease => "Install selected stable".to_string(),
-            Some(_) if installed_newer_than_target && is_current_latest => "Return to stable".to_string(),
-            Some(_) if installed_newer_than_target => "Install selected version".to_string(),
-            Some(current) => match version_cmp(&version, current) {
-                Ordering::Greater => "Install selected upgrade".to_string(),
-                Ordering::Less => "Roll back to selected".to_string(),
-                Ordering::Equal => "Install selected".to_string(),
-            },
-            None => "Install selected".to_string(),
-        };
+        let action_label = version_option_action_label(
+            &version,
+            &manifest.version,
+            installed_version,
+            is_current_latest,
+        );
         options.push(VersionOption {
             version,
             label,
@@ -246,6 +236,73 @@ fn version_options(manifest: &PluginManifest, installed_version: Option<&str>) -
         });
     }
     options
+}
+
+fn determine_channel_switch_mode(
+    installed_version: Option<&str>,
+    latest_version: &str,
+) -> Option<&'static str> {
+    let current = installed_version?;
+    if !is_prerelease_like(current) || is_prerelease_like(latest_version) {
+        return None;
+    }
+
+    match version_cmp(current, latest_version) {
+        Ordering::Greater => Some("return_to_stable"),
+        Ordering::Less => Some("stable_update_available"),
+        Ordering::Equal => Some("return_to_stable"),
+    }
+}
+
+fn version_option_action_label(
+    version: &str,
+    latest_version: &str,
+    installed_version: Option<&str>,
+    is_current_latest: bool,
+) -> String {
+    let installed_newer_than_target = installed_version
+        .map(|current| version_cmp(current, latest_version) == Ordering::Greater)
+        .unwrap_or(false);
+    let installed_is_prerelease = installed_version.map(is_prerelease_like).unwrap_or(false);
+    let latest_is_prerelease = is_prerelease_like(latest_version);
+    let version_is_prerelease = is_prerelease_like(version);
+
+    match installed_version {
+        Some(current) if current == version => "Reinstall this version".to_string(),
+        Some(current) if installed_is_prerelease && !latest_is_prerelease && is_current_latest => {
+            match version_cmp(version, current) {
+                Ordering::Greater | Ordering::Equal => "Install latest stable".to_string(),
+                Ordering::Less => "Return to stable".to_string(),
+            }
+        }
+        Some(_) if installed_is_prerelease && !latest_is_prerelease => {
+            "Install selected stable".to_string()
+        }
+        Some(current) if installed_is_prerelease && version_is_prerelease => {
+            match version_cmp(version, current) {
+                Ordering::Greater => {
+                    if is_current_latest {
+                        "Install latest beta".to_string()
+                    } else {
+                        "Install selected beta".to_string()
+                    }
+                }
+                Ordering::Less => "Roll back to selected beta".to_string(),
+                Ordering::Equal => "Install selected beta".to_string(),
+            }
+        }
+        Some(_) if installed_is_prerelease => "Install selected stable".to_string(),
+        Some(_) if installed_newer_than_target && is_current_latest => {
+            "Return to stable".to_string()
+        }
+        Some(_) if installed_newer_than_target => "Install selected version".to_string(),
+        Some(current) => match version_cmp(version, current) {
+            Ordering::Greater => "Install selected upgrade".to_string(),
+            Ordering::Less => "Roll back to selected".to_string(),
+            Ordering::Equal => "Install selected".to_string(),
+        },
+        None => "Install selected".to_string(),
+    }
 }
 
 fn is_prerelease_like(version: &str) -> bool {
@@ -314,8 +371,8 @@ fn parse_loose_version(raw: &str) -> Option<LooseVersion> {
         numeric_parts.push(0);
     }
 
-    let prerelease = prerelease_start
-        .and_then(|index| parse_prerelease_fragment(&trimmed[index..]));
+    let prerelease =
+        prerelease_start.and_then(|index| parse_prerelease_fragment(&trimmed[index..]));
 
     Some(LooseVersion {
         core: numeric_parts,
@@ -335,7 +392,9 @@ fn parse_prerelease_fragment(raw: &str) -> Option<LoosePrerelease> {
     let split_index = normalized
         .find(|ch: char| ch.is_ascii_digit())
         .unwrap_or(normalized.len());
-    let label = normalized[..split_index].trim_matches(['-', '_', '.', ' ']).to_string();
+    let label = normalized[..split_index]
+        .trim_matches(['-', '_', '.', ' '])
+        .to_string();
     let number = normalized[split_index..]
         .chars()
         .take_while(|ch| ch.is_ascii_digit())
@@ -378,7 +437,10 @@ fn compare_loose_versions(left: &LooseVersion, right: &LooseVersion) -> Ordering
         (Some(_), None) => Ordering::Less,
         (Some(left_pre), Some(right_pre)) => match left_pre.label_rank.cmp(&right_pre.label_rank) {
             Ordering::Equal => match left_pre.label.cmp(&right_pre.label) {
-                Ordering::Equal => left_pre.number.unwrap_or(0).cmp(&right_pre.number.unwrap_or(0)),
+                Ordering::Equal => left_pre
+                    .number
+                    .unwrap_or(0)
+                    .cmp(&right_pre.number.unwrap_or(0)),
                 ordering => ordering,
             },
             ordering => ordering,
@@ -405,7 +467,10 @@ fn collect_releases(manifest: &PluginManifest) -> Vec<PluginRelease> {
     releases
 }
 
-fn resolve_release(manifest: &PluginManifest, requested_version: Option<&str>) -> Result<PluginRelease> {
+fn resolve_release(
+    manifest: &PluginManifest,
+    requested_version: Option<&str>,
+) -> Result<PluginRelease> {
     let releases = collect_releases(manifest);
     if let Some(version) = requested_version {
         return releases
@@ -432,9 +497,13 @@ async fn load_catalog_bundle(prefer_beta: bool) -> Result<CatalogBundle> {
         .build()
         .context("Failed to create HTTP client")?;
 
-    let (index, source) = match fetch_json::<PluginCatalogIndex>(&client, DEFAULT_CATALOG_URL).await {
+    let (index, source) = match fetch_json::<PluginCatalogIndex>(&client, DEFAULT_CATALOG_URL).await
+    {
         Ok(index) => (index, "remote".to_string()),
-        Err(_) => (serde_json::from_str(EMBEDDED_INDEX)?, "embedded".to_string()),
+        Err(_) => (
+            serde_json::from_str(EMBEDDED_INDEX)?,
+            "embedded".to_string(),
+        ),
     };
 
     let mut manifests = HashMap::new();
@@ -464,7 +533,9 @@ async fn load_manifest_for_entry(
     if prefer_beta {
         if let Some(beta_url) = beta_manifest_url(&entry.manifest_url) {
             if let Ok(beta_manifest) = fetch_json::<PluginManifest>(client, &beta_url).await {
-                if version_cmp(&beta_manifest.version, &stable_manifest.version) == Ordering::Greater {
+                if version_cmp(&beta_manifest.version, &stable_manifest.version)
+                    == Ordering::Greater
+                {
                     return Ok(merge_beta_manifest(stable_manifest, beta_manifest));
                 }
             }
@@ -474,8 +545,13 @@ async fn load_manifest_for_entry(
     Ok(stable_manifest)
 }
 
-fn merge_beta_manifest(stable_manifest: PluginManifest, mut beta_manifest: PluginManifest) -> PluginManifest {
-    let mut merged_versions = Vec::with_capacity(1 + stable_manifest.available_versions.len() + beta_manifest.available_versions.len());
+fn merge_beta_manifest(
+    stable_manifest: PluginManifest,
+    mut beta_manifest: PluginManifest,
+) -> PluginManifest {
+    let mut merged_versions = Vec::with_capacity(
+        1 + stable_manifest.available_versions.len() + beta_manifest.available_versions.len(),
+    );
 
     merged_versions.push(PluginRelease {
         version: stable_manifest.version.clone(),
@@ -490,7 +566,10 @@ fn merge_beta_manifest(stable_manifest: PluginManifest, mut beta_manifest: Plugi
         .into_iter()
         .chain(beta_manifest.available_versions.into_iter())
     {
-        if merged_versions.iter().any(|item| item.version == release.version) {
+        if merged_versions
+            .iter()
+            .any(|item| item.version == release.version)
+        {
             continue;
         }
         merged_versions.push(release);
@@ -504,7 +583,11 @@ fn load_local_dev_catalog() -> Result<Option<CatalogBundle>> {
     let manager_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .ok_or_else(|| anyhow!("Unable to resolve manager root"))?;
-    let dev_index_path = manager_root.join("docs").join("plugins").join("dev").join("index.json");
+    let dev_index_path = manager_root
+        .join("docs")
+        .join("plugins")
+        .join("dev")
+        .join("index.json");
     if !dev_index_path.exists() {
         return Ok(None);
     }
@@ -564,7 +647,8 @@ fn embedded_manifest(plugin_id: &str) -> Result<PluginManifest> {
         "me-opendrt" => EMBEDDED_ME_OPENDRT,
         _ => return Err(anyhow!("No embedded manifest available for `{plugin_id}`")),
     };
-    serde_json::from_str(raw).with_context(|| format!("Failed to parse embedded manifest for {plugin_id}"))
+    serde_json::from_str(raw)
+        .with_context(|| format!("Failed to parse embedded manifest for {plugin_id}"))
 }
 
 fn expand_tokens(raw: &str) -> Result<String> {
@@ -581,7 +665,10 @@ fn expand_tokens(raw: &str) -> Result<String> {
     let mappings = [
         ("${MEPM_MANAGER_ROOT}", manager_root.display().to_string()),
         ("${ME_OFX_ROOT}", me_ofx_root.display().to_string()),
-        ("${OFX_WORKSHOP_ROOT}", ofx_workshop_root.display().to_string()),
+        (
+            "${OFX_WORKSHOP_ROOT}",
+            ofx_workshop_root.display().to_string(),
+        ),
     ];
     for (token, replacement) in mappings {
         expanded = expanded.replace(token, &replacement.replace('\\', "\\\\"));
@@ -641,5 +728,103 @@ fn normalize_path_text(raw: &str) -> String {
 fn beta_manifest_url(raw: &str) -> Option<String> {
     raw.strip_suffix("/stable.json")
         .map(|base| format!("{base}/beta.json"))
-        .or_else(|| raw.strip_suffix("\\stable.json").map(|base| format!("{base}\\beta.json")))
+        .or_else(|| {
+            raw.strip_suffix("\\stable.json")
+                .map(|base| format!("{base}\\beta.json"))
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_package() -> PlatformPackage {
+        PlatformPackage {
+            platform: installer::current_platform().to_string(),
+            arch: installer::current_arch().to_string(),
+            download_url: "https://example.com/plugin.zip".to_string(),
+            sha256: "deadbeef".to_string(),
+            package_type: "zip".to_string(),
+            bundle_name: "Example.ofx.bundle".to_string(),
+            bundle_identifier: "com.example.Plugin".to_string(),
+            install_path: "C:\\Test\\Plugins".to_string(),
+            min_manager_version: "0.1.0".to_string(),
+            host_processes: Vec::new(),
+        }
+    }
+
+    fn test_release(version: &str) -> PluginRelease {
+        PluginRelease {
+            version: version.to_string(),
+            release_date: "2026-03-30T00:00:00Z".to_string(),
+            release_notes_url: format!("https://example.com/releases/{version}"),
+            release_highlights: None,
+            platforms: vec![test_package()],
+        }
+    }
+
+    fn test_manifest(version: &str, available_versions: &[&str]) -> PluginManifest {
+        PluginManifest {
+            plugin_id: "example-plugin".to_string(),
+            display_name: "Example Plugin".to_string(),
+            version: version.to_string(),
+            release_date: "2026-03-30T00:00:00Z".to_string(),
+            release_notes_url: format!("https://example.com/releases/{version}"),
+            release_highlights: None,
+            platforms: vec![test_package()],
+            available_versions: available_versions
+                .iter()
+                .map(|version| test_release(version))
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn beta_target_does_not_trigger_stable_channel_switch() {
+        assert_eq!(
+            determine_channel_switch_mode(Some("1.0.5Beta"), "1.0.6Beta"),
+            None
+        );
+    }
+
+    #[test]
+    fn stable_target_keeps_beta_return_to_stable_guidance() {
+        assert_eq!(
+            determine_channel_switch_mode(Some("1.0.7Beta"), "1.0.6"),
+            Some("return_to_stable")
+        );
+        assert_eq!(
+            determine_channel_switch_mode(Some("1.0.5Beta"), "1.0.6"),
+            Some("stable_update_available")
+        );
+    }
+
+    #[test]
+    fn beta_manifest_labels_latest_beta_as_beta() {
+        let manifest = test_manifest("1.0.6Beta", &["1.0.2", "1.0.5Beta"]);
+        let options = version_options(&manifest, Some("1.0.5Beta"));
+        let latest = options
+            .iter()
+            .find(|option| option.version == "1.0.6Beta")
+            .unwrap();
+        let stable = options
+            .iter()
+            .find(|option| option.version == "1.0.2")
+            .unwrap();
+
+        assert_eq!(latest.action_label, "Install latest beta");
+        assert_eq!(stable.action_label, "Install selected stable");
+    }
+
+    #[test]
+    fn stable_manifest_labels_latest_release_as_stable_for_beta_installs() {
+        let manifest = test_manifest("1.0.6", &["1.0.2"]);
+        let options = version_options(&manifest, Some("1.0.5Beta"));
+        let latest = options
+            .iter()
+            .find(|option| option.version == "1.0.6")
+            .unwrap();
+
+        assert_eq!(latest.action_label, "Install latest stable");
+    }
 }
