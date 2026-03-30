@@ -464,7 +464,9 @@ async fn load_manifest_for_entry(
     if prefer_beta {
         if let Some(beta_url) = beta_manifest_url(&entry.manifest_url) {
             if let Ok(beta_manifest) = fetch_json::<PluginManifest>(client, &beta_url).await {
-                return Ok(merge_beta_manifest(stable_manifest, beta_manifest));
+                if version_cmp(&beta_manifest.version, &stable_manifest.version) == Ordering::Greater {
+                    return Ok(merge_beta_manifest(stable_manifest, beta_manifest));
+                }
             }
         }
     }

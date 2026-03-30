@@ -359,6 +359,9 @@ function primaryActionClass(label) {
 
 function actionHelperText(plugin, primaryLabel) {
   if (plugin.catalogBehindInstalled) {
+    if (state.dashboard?.catalogSource === "local-dev") {
+      return `The local dev catalog currently lists ${plugin.latestVersion}, but the detected installed version (${plugin.installedVersion}) is newer. Update the local dev manifest or switch back to the remote feed if this looks wrong.`;
+    }
     return `The catalog currently lists ${plugin.latestVersion}, but the detected installed version (${plugin.installedVersion}) is newer. Refresh the catalog if this looks wrong.`;
   }
   if (primaryLabel === "Update to stable") return "Install the newly released stable version.";
