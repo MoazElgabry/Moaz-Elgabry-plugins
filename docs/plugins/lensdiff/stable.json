@@ -1,0 +1,74 @@
+{
+  "pluginId": "lensdiff",
+  "displayName": "LensDiff",
+  "version": "0.2.0",
+  "releaseDate": "2026-04-19T21:54:12Z",
+  "releaseNotesUrl": "https://github.com/MoazElgabry/LensDiff/releases/tag/0.2.0",
+  "releaseHighlights": "LensDiff is an OpenFX plugin repo for physically inspired diffraction, phase, spectral, and finishing controls.\n\n- Physically inspired lens diffraction rendering for highlight spread, streaks, and structured bloom\n- Aperture controls for shape, blade count, roundness, rotation, obstruction, vanes, and custom apertures\n- Phase controls for defocus, astigmatism, coma, spherical, and higher-order aberrations\n- Field variation controls so the effect can change across the image area\n- Spectrum controls for monochromatic or chromatic diffraction behavior\n- Finishing controls for final look adjustment\n- Built-in presets for common starting points\n- Resolution-aware mode for more consistent results across output sizes",
+  "platforms": [
+    {
+      "platform": "windows",
+      "arch": "x86_64",
+      "downloadUrl": "https://github.com/MoazElgabry/LensDiff/releases/download/0.2.0/LensDiff_v0.2.0_windows_x86_64_portable.zip",
+      "sha256": "c844b0f5dcf33d5248b3518bfff5c985e3d7699a13c77ba156467ea5ad8569f8",
+      "packageType": "zip",
+      "bundleName": "LensDiff.ofx.bundle",
+      "bundleIdentifier": "com.moazelgabry.lensdiff",
+      "installPath": "C:\\Program Files\\Common Files\\OFX\\Plugins",
+      "minManagerVersion": "0.1.0",
+      "hostProcesses": [
+        "Resolve",
+        "DaVinci Resolve",
+        "Fusion",
+        "Fusion Studio",
+        "Nuke",
+        "NukeX",
+        "NukeStudio",
+        "Hiero"
+      ]
+    },
+    {
+      "platform": "macos",
+      "arch": "universal",
+      "downloadUrl": "https://github.com/MoazElgabry/LensDiff/releases/download/0.2.0/LensDiff_v0.2.0_macOS_universal_portable.zip",
+      "sha256": "3b4bd6a408ae94706b67b2efaa6e46132e1d5221cc96d24ec7d396f059476ab4",
+      "packageType": "zip",
+      "bundleName": "LensDiff.ofx.bundle",
+      "bundleIdentifier": "com.moazelgabry.lensdiff",
+      "installPath": "/Library/OFX/Plugins",
+      "minManagerVersion": "0.1.0",
+      "hostProcesses": [
+        "Resolve",
+        "DaVinci Resolve",
+        "Fusion",
+        "Fusion Studio",
+        "Nuke",
+        "NukeX",
+        "NukeStudio",
+        "Hiero"
+      ]
+    },
+    {
+      "platform": "linux",
+      "arch": "x86_64",
+      "downloadUrl": "https://github.com/MoazElgabry/LensDiff/releases/download/0.2.0/LensDiff_v0.2.0_linux_x86_64_cuda_cpu_portable.tar.gz",
+      "sha256": "18034dee79a1c7c179877834f9454f7746457e7c51f07b2555a9f675dfeb643c",
+      "packageType": "tar.gz",
+      "bundleName": "LensDiff.ofx.bundle",
+      "bundleIdentifier": "com.moazelgabry.lensdiff",
+      "installPath": "/usr/OFX/Plugins",
+      "minManagerVersion": "0.1.0",
+      "hostProcesses": [
+        "Resolve",
+        "DaVinci Resolve",
+        "Fusion",
+        "Fusion Studio",
+        "Nuke",
+        "NukeX",
+        "NukeStudio",
+        "Hiero"
+      ]
+    }
+  ],
+  "availableVersions": []
+}
