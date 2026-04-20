@@ -1,6 +1,7 @@
 {
   "pluginId": "lensdiff",
   "displayName": "LensDiff",
+  "iconUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugin-icons/lensdiff.png",
   "version": "0.2.0",
   "releaseDate": "2026-04-19T21:54:12Z",
   "releaseNotesUrl": "https://github.com/MoazElgabry/LensDiff/releases/tag/0.2.0",
@@ -13,7 +14,7 @@
       "sha256": "c844b0f5dcf33d5248b3518bfff5c985e3d7699a13c77ba156467ea5ad8569f8",
       "packageType": "zip",
       "bundleName": "LensDiff.ofx.bundle",
-      "bundleIdentifier": "com.moazelgabry.lensdiff",
+      "bundleIdentifier": "com.moazelgabry.LensDiff",
       "installPath": "C:\\Program Files\\Common Files\\OFX\\Plugins",
       "minManagerVersion": "0.1.0",
       "hostProcesses": [
@@ -34,7 +35,7 @@
       "sha256": "3b4bd6a408ae94706b67b2efaa6e46132e1d5221cc96d24ec7d396f059476ab4",
       "packageType": "zip",
       "bundleName": "LensDiff.ofx.bundle",
-      "bundleIdentifier": "com.moazelgabry.lensdiff",
+      "bundleIdentifier": "com.moazelgabry.LensDiff",
       "installPath": "/Library/OFX/Plugins",
       "minManagerVersion": "0.1.0",
       "hostProcesses": [
@@ -55,7 +56,7 @@
       "sha256": "18034dee79a1c7c179877834f9454f7746457e7c51f07b2555a9f675dfeb643c",
       "packageType": "tar.gz",
       "bundleName": "LensDiff.ofx.bundle",
-      "bundleIdentifier": "com.moazelgabry.lensdiff",
+      "bundleIdentifier": "com.moazelgabry.LensDiff",
       "installPath": "/usr/OFX/Plugins",
       "minManagerVersion": "0.1.0",
       "hostProcesses": [
