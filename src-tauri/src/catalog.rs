@@ -145,6 +145,7 @@ fn build_plugin_status(
     PluginStatus {
         plugin_id: entry.plugin_id.clone(),
         display_name: manifest.display_name.clone(),
+        icon_url: manifest.icon_url.clone().or(entry.icon_url.clone()),
         latest_version: manifest.version.clone(),
         installed_version,
         install_path: package.install_path.clone(),
@@ -660,11 +661,15 @@ fn expand_tokens(raw: &str) -> Result<String> {
         .ok_or_else(|| anyhow!("Unable to resolve GitHub root"))?;
     let me_ofx_root = git_root.join("ME_OFX");
     let ofx_workshop_root = git_root.join("OFX-Workshop");
+    let lensdiff_root = std::env::var("LENSDIFF_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| git_root.join("LensDiff"));
 
     let mut expanded = raw.to_string();
     let mappings = [
         ("${MEPM_MANAGER_ROOT}", manager_root.display().to_string()),
         ("${ME_OFX_ROOT}", me_ofx_root.display().to_string()),
+        ("${LENSDIFF_ROOT}", lensdiff_root.display().to_string()),
         (
             "${OFX_WORKSHOP_ROOT}",
             ofx_workshop_root.display().to_string(),

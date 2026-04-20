@@ -1,6 +1,7 @@
 {
   "pluginId": "chromaspace",
   "displayName": "Chromaspace",
+  "iconUrl": "${MEPM_MANAGER_ROOT}\\docs\\plugin-icons\\chromaspace.png",
   "version": "dev-local",
   "releaseDate": "2026-03-17T00:00:00Z",
   "releaseNotesUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/release-notes/chromaspace-0.0.0-dev.html",

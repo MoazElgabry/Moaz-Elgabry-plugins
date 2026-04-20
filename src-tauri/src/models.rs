@@ -26,6 +26,7 @@ pub struct ManagerSummary {
 pub struct PluginStatus {
     pub plugin_id: String,
     pub display_name: String,
+    pub icon_url: Option<String>,
     pub latest_version: String,
     pub installed_version: Option<String>,
     pub install_path: String,
@@ -64,6 +65,7 @@ pub struct CatalogEntry {
     pub plugin_id: String,
     pub display_name: String,
     pub manifest_url: String,
+    pub icon_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -71,6 +73,7 @@ pub struct CatalogEntry {
 pub struct PluginManifest {
     pub plugin_id: String,
     pub display_name: String,
+    pub icon_url: Option<String>,
     pub version: String,
     pub release_date: String,
     pub release_notes_url: String,

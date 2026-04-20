@@ -4,12 +4,20 @@
     {
       "pluginId": "chromaspace",
       "displayName": "Chromaspace",
-      "manifestUrl": "${MEPM_MANAGER_ROOT}\\docs\\plugins\\dev\\chromaspace.local.json"
+      "manifestUrl": "${MEPM_MANAGER_ROOT}\\docs\\plugins\\dev\\chromaspace.local.json",
+      "iconUrl": "${MEPM_MANAGER_ROOT}\\docs\\plugin-icons\\chromaspace.png"
     },
     {
       "pluginId": "me-opendrt",
       "displayName": "ME_OpenDRT",
-      "manifestUrl": "${MEPM_MANAGER_ROOT}\\docs\\plugins\\dev\\me-opendrt.local.json"
+      "manifestUrl": "${MEPM_MANAGER_ROOT}\\docs\\plugins\\dev\\me-opendrt.local.json",
+      "iconUrl": "${MEPM_MANAGER_ROOT}\\docs\\plugin-icons\\me-opendrt.png"
+    },
+    {
+      "pluginId": "lensdiff",
+      "displayName": "LensDiff",
+      "manifestUrl": "${MEPM_MANAGER_ROOT}\\docs\\plugins\\dev\\lensdiff.local.json",
+      "iconUrl": "${MEPM_MANAGER_ROOT}\\docs\\plugin-icons\\lensdiff.png"
     }
   ]
 }

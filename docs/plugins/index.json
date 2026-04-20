@@ -4,12 +4,14 @@
     {
       "pluginId": "chromaspace",
       "displayName": "Chromaspace",
-      "manifestUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugins/chromaspace/stable.json"
+      "manifestUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugins/chromaspace/stable.json",
+      "iconUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugin-icons/chromaspace.png"
     },
     {
       "pluginId": "me-opendrt",
       "displayName": "ME_OpenDRT",
-      "manifestUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugins/me-opendrt/stable.json"
+      "manifestUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugins/me-opendrt/stable.json",
+      "iconUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugin-icons/me-opendrt.png"
     }
   ]
 }

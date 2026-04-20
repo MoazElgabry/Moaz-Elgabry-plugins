@@ -1,8 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
-import chromaspaceIcon from "./assets/plugin-icons/chromaspace.png";
-import meOpenDRTIcon from "./assets/plugin-icons/me-opendrt.png";
 import "./styles.css";
 
 const state = {
@@ -437,27 +435,38 @@ function renderMaintenanceDrawer(plugin) {
 }
 
 function pluginIconMarkup(plugin) {
-  if (plugin.pluginId === "chromaspace") {
+  const iconUrl = normalizeIconUrl(plugin.iconUrl);
+  const initial = escapeHtml(plugin.displayName.charAt(0));
+  if (iconUrl) {
     return `
-      <div class="plugin-icon" aria-hidden="true">
-        <img src="${chromaspaceIcon}" alt="" loading="lazy" />
-      </div>
-    `;
-  }
-
-  if (plugin.pluginId === "me-opendrt") {
-    return `
-      <div class="plugin-icon" aria-hidden="true">
-        <img src="${meOpenDRTIcon}" alt="" loading="lazy" />
+      <div class="plugin-icon plugin-icon-has-image" aria-hidden="true">
+        <img src="${escapeHtml(iconUrl)}" alt="" loading="lazy" />
+        <span>${initial}</span>
       </div>
     `;
   }
 
   return `
     <div class="plugin-icon plugin-icon-fallback" aria-hidden="true">
-      <span>${plugin.displayName.charAt(0)}</span>
+      <span>${initial}</span>
     </div>
   `;
+}
+
+function normalizeIconUrl(raw) {
+  if (typeof raw !== "string") return "";
+  const value = raw.trim();
+  if (!value) return "";
+  if (/^[a-zA-Z]:[\\/]/.test(value)) {
+    return `file:///${value.replaceAll("\\", "/")}`;
+  }
+  if (value.startsWith("/")) {
+    return `file://${value}`;
+  }
+  if (value.startsWith("\\\\")) {
+    return `file:${value.replaceAll("\\", "/")}`;
+  }
+  return value;
 }
 
 function renderVersionDrawer(plugin) {
@@ -613,6 +622,21 @@ function renderPlugins() {
           releaseHighlights: plugin.releaseHighlights
         });
       });
+    }
+
+    const iconImage = card.querySelector(".plugin-icon img");
+    if (iconImage) {
+      iconImage.addEventListener(
+        "error",
+        () => {
+          const icon = iconImage.closest(".plugin-icon");
+          if (!icon) return;
+          icon.classList.remove("plugin-icon-has-image");
+          icon.classList.add("plugin-icon-fallback");
+          iconImage.remove();
+        },
+        { once: true }
+      );
     }
 
     if ((plugin.availableVersions?.length ?? 0) > 1) {

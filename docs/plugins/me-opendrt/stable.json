@@ -1,6 +1,7 @@
 {
   "pluginId": "me-opendrt",
   "displayName": "ME_OpenDRT",
+  "iconUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugin-icons/me-opendrt.png",
   "version": "1.2.11",
   "releaseDate": "2026-03-20T00:00:00Z",
   "releaseNotesUrl": "https://github.com/MoazElgabry/ME_OpenDRT-OFX/releases/tag/v1.2.11",

@@ -31,9 +31,13 @@ function parseArgs(argv) {
 
 function discoverDefaultConfigs(managerRoot) {
   const gitRoot = path.resolve(managerRoot, "..");
+  const lensDiffRoot = process.env.LENSDIFF_ROOT
+    ? path.resolve(process.env.LENSDIFF_ROOT)
+    : path.join(gitRoot, "LensDiff");
   const candidates = [
     path.join(gitRoot, "Chromaspace", "manager-release-config.json"),
-    path.join(gitRoot, "ME_OFX", "manager-release-config.json")
+    path.join(gitRoot, "ME_OFX", "manager-release-config.json"),
+    path.join(lensDiffRoot, "manager-release-config.json")
   ];
   return candidates.filter((candidate) => fs.existsSync(candidate));
 }
@@ -87,8 +91,40 @@ function validateConfig(config) {
   assert(Array.isArray(config.hostProcesses) && config.hostProcesses.length > 0, `${config.pluginId}: hostProcesses must be a non-empty array`);
   assert(Array.isArray(config.requiredFamilies) && config.requiredFamilies.length > 0, `${config.pluginId}: requiredFamilies must be a non-empty array`);
   assert(Array.isArray(config.assetRules) && config.assetRules.length > 0, `${config.pluginId}: assetRules must be a non-empty array`);
+  if (config.iconSourcePath !== undefined) {
+    assert(
+      typeof config.iconSourcePath === "string" && config.iconSourcePath.length > 0,
+      `${config.pluginId}: iconSourcePath must be a non-empty string when provided`
+    );
+  }
 
   config.assetRules.forEach((rule, index) => validateAssetRule(config, rule, index));
+}
+
+function iconUrlForPlugin(pluginId) {
+  return `https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugin-icons/${pluginId}.png`;
+}
+
+async function copyPluginIcon(config, configPath, managerRoot) {
+  if (typeof config.iconSourcePath !== "string" || config.iconSourcePath.length === 0) {
+    return undefined;
+  }
+
+  const sourcePath = path.resolve(path.dirname(configPath), config.iconSourcePath);
+  const destinationPath = path.join(managerRoot, "docs", "plugin-icons", `${config.pluginId}.png`);
+  fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
+
+  if (fs.existsSync(sourcePath)) {
+    fs.copyFileSync(sourcePath, destinationPath);
+    return iconUrlForPlugin(config.pluginId);
+  }
+
+  assert(typeof fetch === "function", `${config.pluginId}: fetch is unavailable for remote icon retrieval`);
+  const rawUrl = `https://raw.githubusercontent.com/${config.releaseRepo}/main/${config.iconSourcePath}`;
+  const response = await fetch(rawUrl);
+  assert(response.ok, `${config.pluginId}: failed to fetch icon source from ${rawUrl}`);
+  fs.writeFileSync(destinationPath, Buffer.from(await response.arrayBuffer()));
+  return iconUrlForPlugin(config.pluginId);
 }
 
 function parseVersionFromTag(tagName, config) {
@@ -237,13 +273,16 @@ async function buildReleaseFromGitHubRelease(config, release, options = {}) {
   };
 }
 
-function updateIndex(indexPath, pluginId, displayName) {
+function updateIndex(indexPath, pluginId, displayName, iconUrl) {
   const index = readJson(indexPath);
   index.generatedAt = new Date().toISOString();
   const manifestUrl = `https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugins/${pluginId}/stable.json`;
   const entries = Array.isArray(index.plugins) ? [...index.plugins] : [];
   const existingIndex = entries.findIndex((entry) => entry.pluginId === pluginId);
   const nextEntry = { pluginId, displayName, manifestUrl };
+  if (iconUrl) {
+    nextEntry.iconUrl = iconUrl;
+  }
 
   if (existingIndex >= 0) {
     entries[existingIndex] = nextEntry;
@@ -259,6 +298,7 @@ function updateIndex(indexPath, pluginId, displayName) {
 async function generateForConfig(configPath, releasesPath, managerRoot) {
   const config = readJson(configPath);
   validateConfig(config);
+  const iconUrl = await copyPluginIcon(config, configPath, managerRoot);
 
   const allReleases = sortReleases(readJson(releasesPath))
     .filter((release) => !release.draft)
@@ -285,6 +325,7 @@ async function generateForConfig(configPath, releasesPath, managerRoot) {
   const stableManifest = {
     pluginId: config.pluginId,
     displayName: config.displayName,
+    ...(iconUrl ? { iconUrl } : {}),
     version: currentStableRelease.version,
     releaseDate: currentStableRelease.releaseDate,
     releaseNotesUrl: currentStableRelease.releaseNotesUrl,
@@ -301,6 +342,7 @@ async function generateForConfig(configPath, releasesPath, managerRoot) {
     betaManifest = {
       pluginId: config.pluginId,
       displayName: config.displayName,
+      ...(iconUrl ? { iconUrl } : {}),
       version: currentBetaRelease.version,
       releaseDate: currentBetaRelease.releaseDate,
       releaseNotesUrl: currentBetaRelease.releaseNotesUrl,
@@ -322,7 +364,7 @@ async function generateForConfig(configPath, releasesPath, managerRoot) {
     removeIfExists(betaPath);
   }
 
-  updateIndex(indexPath, config.pluginId, config.displayName);
+  updateIndex(indexPath, config.pluginId, config.displayName, iconUrl);
   console.log(`Generated manifests for ${config.pluginId} from ${config.releaseRepo}`);
 }
 

@@ -1,6 +1,7 @@
 {
   "pluginId": "chromaspace",
   "displayName": "Chromaspace",
+  "iconUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugin-icons/chromaspace.png",
   "version": "1.0.9Beta",
   "releaseDate": "2026-04-19T19:10:09Z",
   "releaseNotesUrl": "https://github.com/MoazElgabry/Chromaspace/releases/tag/v1.0.9Beta",
