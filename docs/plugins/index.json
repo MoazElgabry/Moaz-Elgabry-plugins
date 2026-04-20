@@ -1,11 +1,16 @@
 {
-  "generatedAt": "2026-04-19T19:10:20.708Z",
+  "generatedAt": "2026-04-19T21:54:23.097Z",
   "plugins": [
     {
       "pluginId": "chromaspace",
       "displayName": "Chromaspace",
       "manifestUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugins/chromaspace/stable.json",
       "iconUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugin-icons/chromaspace.png"
+    },
+    {
+      "pluginId": "lensdiff",
+      "displayName": "LensDiff",
+      "manifestUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugins/lensdiff/stable.json"
     },
     {
       "pluginId": "me-opendrt",
