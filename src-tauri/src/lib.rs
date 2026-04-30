@@ -3,7 +3,10 @@ mod installer;
 mod models;
 mod settings;
 
+use std::process::Command;
 use tauri::Manager;
+
+const SUPPORT_URL: &str = "https://buymeacoffee.com/moazelgabry";
 
 #[tauri::command]
 async fn dashboard_state() -> Result<models::DashboardState, String> {
@@ -32,6 +35,28 @@ async fn set_beta_releases_enabled(enabled: bool) -> Result<(), String> {
         .map_err(|error| models::UiError::from_error("settings", &error).to_json_string())
 }
 
+#[tauri::command]
+fn open_support_link() -> Result<(), String> {
+    let mut command = if cfg!(target_os = "windows") {
+        let mut command = Command::new("rundll32.exe");
+        command.args(["url.dll,FileProtocolHandler", SUPPORT_URL]);
+        command
+    } else if cfg!(target_os = "macos") {
+        let mut command = Command::new("open");
+        command.arg(SUPPORT_URL);
+        command
+    } else {
+        let mut command = Command::new("xdg-open");
+        command.arg(SUPPORT_URL);
+        command
+    };
+
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("Failed to open support link: {error}"))
+}
+
 pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
@@ -46,7 +71,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             dashboard_state,
             apply_plugin_action,
-            set_beta_releases_enabled
+            set_beta_releases_enabled,
+            open_support_link
         ])
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {

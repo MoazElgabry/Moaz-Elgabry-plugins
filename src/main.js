@@ -17,6 +17,7 @@ const elements = {
   betaToggle: document.querySelector("#beta-releases-toggle"),
   refreshButton: document.querySelector("#refresh-button"),
   updateButton: document.querySelector("#check-updates-button"),
+  supportButton: document.querySelector("#support-button"),
   pluginList: document.querySelector("#plugin-list"),
   activityLog: document.querySelector("#activity-log"),
   alertBanner: document.querySelector("#alert-banner"),
@@ -787,6 +788,11 @@ async function applyPluginAction(pluginId, action, targetVersion = null) {
 }
 
 async function checkForManagerUpdates() {
+  if (!state.dashboard?.manager) {
+    logActivity("Manager updater status is unavailable until the catalog loads successfully.");
+    return;
+  }
+
   if (!state.dashboard?.manager?.updaterConfigured) {
     logActivity("Manager updater is not configured in this build yet.");
     return;
@@ -810,8 +816,19 @@ async function checkForManagerUpdates() {
   }
 }
 
+async function openSupportLink() {
+  try {
+    await invoke("open_support_link");
+  } catch (error) {
+    const parsed = parseUiError(error, "Couldn't open the support link.");
+    showAlert(parsed);
+    logActivity(`Support link failed: ${parsed.summary}`);
+  }
+}
+
 elements.refreshButton.addEventListener("click", refreshDashboard);
 elements.updateButton.addEventListener("click", checkForManagerUpdates);
+elements.supportButton.addEventListener("click", openSupportLink);
 elements.alertDismiss.addEventListener("click", hideAlert);
 elements.betaToggle.addEventListener("change", (event) => {
   updateBetaReleasesPreference(event.currentTarget.checked);

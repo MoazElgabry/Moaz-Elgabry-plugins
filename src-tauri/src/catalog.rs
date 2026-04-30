@@ -17,6 +17,7 @@ pub const DEFAULT_CATALOG_URL: &str =
 
 const EMBEDDED_INDEX: &str = include_str!("../../docs/plugins/index.json");
 const EMBEDDED_CHROMASPACE: &str = include_str!("../../docs/plugins/chromaspace/stable.json");
+const EMBEDDED_LENSDIFF: &str = include_str!("../../docs/plugins/lensdiff/stable.json");
 const EMBEDDED_ME_OPENDRT: &str = include_str!("../../docs/plugins/me-opendrt/stable.json");
 
 #[derive(Debug, Clone)]
@@ -645,6 +646,7 @@ where
 fn embedded_manifest(plugin_id: &str) -> Result<PluginManifest> {
     let raw = match plugin_id {
         "chromaspace" => EMBEDDED_CHROMASPACE,
+        "lensdiff" => EMBEDDED_LENSDIFF,
         "me-opendrt" => EMBEDDED_ME_OPENDRT,
         _ => return Err(anyhow!("No embedded manifest available for `{plugin_id}`")),
     };
@@ -772,6 +774,7 @@ mod tests {
         PluginManifest {
             plugin_id: "example-plugin".to_string(),
             display_name: "Example Plugin".to_string(),
+            icon_url: None,
             version: version.to_string(),
             release_date: "2026-03-30T00:00:00Z".to_string(),
             release_notes_url: format!("https://example.com/releases/{version}"),
@@ -831,5 +834,15 @@ mod tests {
             .unwrap();
 
         assert_eq!(latest.action_label, "Install latest stable");
+    }
+
+    #[test]
+    fn embedded_catalog_plugins_have_embedded_manifest_fallbacks() {
+        let index: PluginCatalogIndex = serde_json::from_str(EMBEDDED_INDEX).unwrap();
+
+        for entry in index.plugins {
+            let manifest = embedded_manifest(&entry.plugin_id).unwrap();
+            assert_eq!(manifest.plugin_id, entry.plugin_id);
+        }
     }
 }
