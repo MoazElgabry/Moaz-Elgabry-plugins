@@ -73,6 +73,77 @@
   ],
   "availableVersions": [
     {
+      "version": "1.0.2",
+      "releaseDate": "2026-03-24T00:00:50Z",
+      "releaseNotesUrl": "https://github.com/MoazElgabry/Chromaspace/releases/tag/chromaspace-draft-v1.0.2",
+      "releaseHighlights": "- Added a new mode to linearize the image for plotting.\n- Refined sampling weighting for the Neutral Radius.\n- Changed the viewer background colour when the Neutral Radius is used.\n- Expanded the range of point size.",
+      "platforms": [
+        {
+          "platform": "windows",
+          "arch": "x86_64",
+          "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/chromaspace-draft-v1.0.2/Chromaspace_v1.0.2_windows_x86_64_portable.zip",
+          "sha256": "2a0be48deb9226181fa985f15ad28db9180e55b21d4dfb9f2fea8d725a1e9070",
+          "packageType": "zip",
+          "bundleName": "Chromaspace.ofx.bundle",
+          "bundleIdentifier": "com.moazelgabry.Chromaspace",
+          "installPath": "C:\\Program Files\\Common Files\\OFX\\Plugins",
+          "minManagerVersion": "0.1.0",
+          "hostProcesses": [
+            "Resolve",
+            "DaVinci Resolve",
+            "Fusion",
+            "Fusion Studio",
+            "Nuke",
+            "NukeX",
+            "NukeStudio",
+            "Hiero"
+          ]
+        },
+        {
+          "platform": "macos",
+          "arch": "universal",
+          "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/chromaspace-draft-v1.0.2/Chromaspace_v1.0.2_macOS_universal_portable.zip",
+          "sha256": "475ced4ad5779ddcb3dd9e40e789564fd1597cdfea21035574696a0e6ceb7d33",
+          "packageType": "zip",
+          "bundleName": "Chromaspace.ofx.bundle",
+          "bundleIdentifier": "com.moazelgabry.Chromaspace",
+          "installPath": "/Library/OFX/Plugins",
+          "minManagerVersion": "0.1.0",
+          "hostProcesses": [
+            "Resolve",
+            "DaVinci Resolve",
+            "Fusion",
+            "Fusion Studio",
+            "Nuke",
+            "NukeX",
+            "NukeStudio",
+            "Hiero"
+          ]
+        },
+        {
+          "platform": "linux",
+          "arch": "x86_64",
+          "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/chromaspace-draft-v1.0.2/Chromaspace_v1.0.2_linux_x86_64_cuda_opencl_cpu_portable.tar.gz",
+          "sha256": "533db9d43206a5db1a22af3a5f69b362055973394c604a958e4958faea909135",
+          "packageType": "tar.gz",
+          "bundleName": "Chromaspace.ofx.bundle",
+          "bundleIdentifier": "com.moazelgabry.Chromaspace",
+          "installPath": "/usr/OFX/Plugins",
+          "minManagerVersion": "0.1.0",
+          "hostProcesses": [
+            "Resolve",
+            "DaVinci Resolve",
+            "Fusion",
+            "Fusion Studio",
+            "Nuke",
+            "NukeX",
+            "NukeStudio",
+            "Hiero"
+          ]
+        }
+      ]
+    },
+    {
       "version": "1.0.1",
       "releaseDate": "2026-03-22T22:28:22Z",
       "releaseNotesUrl": "https://github.com/MoazElgabry/Chromaspace/releases/tag/chromaspace-draft-v1.0.1",
