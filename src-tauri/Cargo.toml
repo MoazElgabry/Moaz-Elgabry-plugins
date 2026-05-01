@@ -1,6 +1,6 @@
 [package]
 name = "moaz-elgabry-plugins"
-version = "0.1.18"
+version = "0.1.19"
 edition = "2021"
 description = "Cross-platform desktop manager for Chromaspace, LensDiff, and ME_OpenDRT"
 

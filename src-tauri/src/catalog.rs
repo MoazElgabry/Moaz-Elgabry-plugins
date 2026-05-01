@@ -5,12 +5,14 @@ use crate::models::{
 };
 use crate::settings;
 use anyhow::{anyhow, Context, Result};
+use reqwest::header::{CACHE_CONTROL, PRAGMA};
 use reqwest::Client;
 use serde::de::DeserializeOwned;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const DEFAULT_CATALOG_URL: &str =
     "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugins/index.json";
@@ -629,8 +631,11 @@ where
             .with_context(|| format!("Failed to parse JSON from {}", local_path.display()));
     }
 
+    let request_url = cache_busted_url(url);
     let response = client
-        .get(url)
+        .get(&request_url)
+        .header(CACHE_CONTROL, "no-cache, no-store, must-revalidate")
+        .header(PRAGMA, "no-cache")
         .send()
         .await
         .with_context(|| format!("Failed to fetch {url}"))?
@@ -641,6 +646,19 @@ where
         .json::<T>()
         .await
         .with_context(|| format!("Failed to parse JSON from {url}"))
+}
+
+fn cache_busted_url(url: &str) -> String {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return url.to_string();
+    }
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default();
+    let separator = if url.contains('?') { '&' } else { '?' };
+    format!("{url}{separator}mepm_refresh={now}")
 }
 
 fn embedded_manifest(plugin_id: &str) -> Result<PluginManifest> {
