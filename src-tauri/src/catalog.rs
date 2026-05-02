@@ -17,11 +17,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub const DEFAULT_CATALOG_URL: &str =
     "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugins/index.json";
 
-const EMBEDDED_INDEX: &str = include_str!("../../docs/plugins/index.json");
-const EMBEDDED_CHROMASPACE: &str = include_str!("../../docs/plugins/chromaspace/stable.json");
-const EMBEDDED_LENSDIFF: &str = include_str!("../../docs/plugins/lensdiff/stable.json");
-const EMBEDDED_ME_OPENDRT: &str = include_str!("../../docs/plugins/me-opendrt/stable.json");
-
 #[derive(Debug, Clone)]
 pub struct CatalogBundle {
     pub source: String,
@@ -501,14 +496,9 @@ async fn load_catalog_bundle(prefer_beta: bool) -> Result<CatalogBundle> {
         .build()
         .context("Failed to create HTTP client")?;
 
-    let (index, source) = match fetch_json::<PluginCatalogIndex>(&client, DEFAULT_CATALOG_URL).await
-    {
-        Ok(index) => (index, "remote".to_string()),
-        Err(_) => (
-            serde_json::from_str(EMBEDDED_INDEX)?,
-            "embedded".to_string(),
-        ),
-    };
+    let index = fetch_json::<PluginCatalogIndex>(&client, DEFAULT_CATALOG_URL)
+        .await
+        .context("Failed to load the remote plugin catalog index")?;
 
     let mut manifests = HashMap::new();
     for entry in &index.plugins {
@@ -517,7 +507,7 @@ async fn load_catalog_bundle(prefer_beta: bool) -> Result<CatalogBundle> {
     }
 
     Ok(CatalogBundle {
-        source,
+        source: "remote".to_string(),
         source_label: DEFAULT_CATALOG_URL.to_string(),
         entries: index.plugins,
         manifests,
@@ -529,10 +519,9 @@ async fn load_manifest_for_entry(
     entry: &CatalogEntry,
     prefer_beta: bool,
 ) -> Result<PluginManifest> {
-    let stable_manifest = match fetch_json::<PluginManifest>(client, &entry.manifest_url).await {
-        Ok(value) => value,
-        Err(_) => embedded_manifest(&entry.plugin_id)?,
-    };
+    let stable_manifest = fetch_json::<PluginManifest>(client, &entry.manifest_url)
+        .await
+        .with_context(|| format!("Failed to load remote manifest for `{}`", entry.plugin_id))?;
 
     if prefer_beta {
         if let Some(beta_url) = beta_manifest_url(&entry.manifest_url) {
@@ -659,17 +648,6 @@ fn cache_busted_url(url: &str) -> String {
         .unwrap_or_default();
     let separator = if url.contains('?') { '&' } else { '?' };
     format!("{url}{separator}mepm_refresh={now}")
-}
-
-fn embedded_manifest(plugin_id: &str) -> Result<PluginManifest> {
-    let raw = match plugin_id {
-        "chromaspace" => EMBEDDED_CHROMASPACE,
-        "lensdiff" => EMBEDDED_LENSDIFF,
-        "me-opendrt" => EMBEDDED_ME_OPENDRT,
-        _ => return Err(anyhow!("No embedded manifest available for `{plugin_id}`")),
-    };
-    serde_json::from_str(raw)
-        .with_context(|| format!("Failed to parse embedded manifest for {plugin_id}"))
 }
 
 fn expand_tokens(raw: &str) -> Result<String> {
@@ -854,13 +832,4 @@ mod tests {
         assert_eq!(latest.action_label, "Install latest stable");
     }
 
-    #[test]
-    fn embedded_catalog_plugins_have_embedded_manifest_fallbacks() {
-        let index: PluginCatalogIndex = serde_json::from_str(EMBEDDED_INDEX).unwrap();
-
-        for entry in index.plugins {
-            let manifest = embedded_manifest(&entry.plugin_id).unwrap();
-            assert_eq!(manifest.plugin_id, entry.plugin_id);
-        }
-    }
 }
