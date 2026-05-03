@@ -500,16 +500,19 @@ async fn load_catalog_bundle(prefer_beta: bool) -> Result<CatalogBundle> {
         .await
         .context("Failed to load the remote plugin catalog index")?;
 
+    let mut entries = Vec::new();
     let mut manifests = HashMap::new();
     for entry in &index.plugins {
-        let manifest = load_manifest_for_entry(&client, entry, prefer_beta).await?;
-        manifests.insert(entry.plugin_id.clone(), manifest);
+        if let Some(manifest) = load_manifest_for_entry(&client, entry, prefer_beta).await? {
+            manifests.insert(entry.plugin_id.clone(), manifest);
+            entries.push(entry.clone());
+        }
     }
 
     Ok(CatalogBundle {
         source: "remote".to_string(),
         source_label: DEFAULT_CATALOG_URL.to_string(),
-        entries: index.plugins,
+        entries,
         manifests,
     })
 }
@@ -518,24 +521,37 @@ async fn load_manifest_for_entry(
     client: &Client,
     entry: &CatalogEntry,
     prefer_beta: bool,
-) -> Result<PluginManifest> {
-    let stable_manifest = fetch_json::<PluginManifest>(client, &entry.manifest_url)
-        .await
-        .with_context(|| format!("Failed to load remote manifest for `{}`", entry.plugin_id))?;
+) -> Result<Option<PluginManifest>> {
+    if let Some(stable_url) = entry_stable_manifest_url(entry) {
+        let stable_manifest = fetch_json::<PluginManifest>(client, stable_url)
+            .await
+            .with_context(|| format!("Failed to load remote manifest for `{}`", entry.plugin_id))?;
 
-    if prefer_beta {
-        if let Some(beta_url) = beta_manifest_url(&entry.manifest_url) {
-            if let Ok(beta_manifest) = fetch_json::<PluginManifest>(client, &beta_url).await {
-                if version_cmp(&beta_manifest.version, &stable_manifest.version)
-                    == Ordering::Greater
-                {
-                    return Ok(merge_beta_manifest(stable_manifest, beta_manifest));
+        if prefer_beta {
+            let beta_url = entry_beta_manifest_url(entry);
+            if let Some(beta_url) = beta_url {
+                if let Ok(beta_manifest) = fetch_json::<PluginManifest>(client, &beta_url).await {
+                    if version_cmp(&beta_manifest.version, &stable_manifest.version)
+                        == Ordering::Greater
+                    {
+                        return Ok(Some(merge_beta_manifest(stable_manifest, beta_manifest)));
+                    }
                 }
             }
         }
+
+        return Ok(Some(stable_manifest));
     }
 
-    Ok(stable_manifest)
+    if prefer_beta {
+        let beta_url = entry_beta_manifest_url(entry).unwrap_or_else(|| entry.manifest_url.clone());
+        let beta_manifest = fetch_json::<PluginManifest>(client, &beta_url)
+            .await
+            .with_context(|| format!("Failed to load beta manifest for `{}`", entry.plugin_id))?;
+        return Ok(Some(beta_manifest));
+    }
+
+    Ok(None)
 }
 
 fn merge_beta_manifest(
@@ -737,6 +753,20 @@ fn beta_manifest_url(raw: &str) -> Option<String> {
         })
 }
 
+fn entry_stable_manifest_url(entry: &CatalogEntry) -> Option<&str> {
+    entry.stable_manifest_url.as_deref().or_else(|| {
+        Some(entry.manifest_url.as_str())
+            .filter(|_| beta_manifest_url(&entry.manifest_url).is_some())
+    })
+}
+
+fn entry_beta_manifest_url(entry: &CatalogEntry) -> Option<String> {
+    entry
+        .beta_manifest_url
+        .clone()
+        .or_else(|| entry_stable_manifest_url(entry).and_then(beta_manifest_url))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -780,6 +810,17 @@ mod tests {
                 .iter()
                 .map(|version| test_release(version))
                 .collect(),
+        }
+    }
+
+    fn test_catalog_entry(manifest_url: &str) -> CatalogEntry {
+        CatalogEntry {
+            plugin_id: "example-plugin".to_string(),
+            display_name: "Example Plugin".to_string(),
+            manifest_url: manifest_url.to_string(),
+            stable_manifest_url: None,
+            beta_manifest_url: None,
+            icon_url: None,
         }
     }
 
@@ -832,4 +873,35 @@ mod tests {
         assert_eq!(latest.action_label, "Install latest stable");
     }
 
+    #[test]
+    fn beta_only_index_entry_has_no_inferred_stable_manifest() {
+        let entry = test_catalog_entry(
+            "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugins/lensdiff/beta.json",
+        );
+
+        assert_eq!(entry_stable_manifest_url(&entry), None);
+        assert_eq!(
+            entry_beta_manifest_url(&entry),
+            Some(entry.manifest_url.clone())
+        );
+    }
+
+    #[test]
+    fn legacy_stable_index_entry_can_infer_beta_manifest() {
+        let entry = test_catalog_entry(
+            "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugins/lensdiff/stable.json",
+        );
+
+        assert_eq!(
+            entry_stable_manifest_url(&entry),
+            Some(entry.manifest_url.as_str())
+        );
+        assert_eq!(
+            entry_beta_manifest_url(&entry),
+            Some(
+                "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugins/lensdiff/beta.json"
+                    .to_string()
+            )
+        );
+    }
 }

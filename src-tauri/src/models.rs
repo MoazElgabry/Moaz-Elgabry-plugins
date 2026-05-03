@@ -65,6 +65,10 @@ pub struct CatalogEntry {
     pub plugin_id: String,
     pub display_name: String,
     pub manifest_url: String,
+    #[serde(default)]
+    pub stable_manifest_url: Option<String>,
+    #[serde(default)]
+    pub beta_manifest_url: Option<String>,
     pub icon_url: Option<String>,
 }
 
@@ -190,7 +194,11 @@ impl UiError {
     }
 }
 
-fn classify_error<'a>(operation: &'a str, message: &'a str, details: &'a str) -> (&'a str, &'a str) {
+fn classify_error<'a>(
+    operation: &'a str,
+    message: &'a str,
+    details: &'a str,
+) -> (&'a str, &'a str) {
     if details.contains("Checksum mismatch") {
         return (
             "checksum_mismatch",
@@ -226,7 +234,9 @@ fn classify_error<'a>(operation: &'a str, message: &'a str, details: &'a str) ->
         );
     }
 
-    if details.contains("Failed to download") || details.contains("Unexpected response while downloading") {
+    if details.contains("Failed to download")
+        || details.contains("Unexpected response while downloading")
+    {
         return (
             "download_failed",
             "The plugin package could not be downloaded.",
@@ -254,7 +264,9 @@ fn classify_error<'a>(operation: &'a str, message: &'a str, details: &'a str) ->
         );
     }
 
-    if details.contains("Linux bundle did not contain") || details.contains("Archive did not contain an .ofx.bundle") {
+    if details.contains("Linux bundle did not contain")
+        || details.contains("Archive did not contain an .ofx.bundle")
+    {
         return (
             "linux_package_layout_invalid",
             "The Linux plugin package layout was not recognized.",
@@ -307,7 +319,10 @@ fn classify_error<'a>(operation: &'a str, message: &'a str, details: &'a str) ->
         return ("unknown", "The operation failed for an unknown reason.");
     }
 
-    ("operation_failed", "The plugin operation could not be completed.")
+    (
+        "operation_failed",
+        "The plugin operation could not be completed.",
+    )
 }
 
 fn escape_json_string(raw: &str) -> String {

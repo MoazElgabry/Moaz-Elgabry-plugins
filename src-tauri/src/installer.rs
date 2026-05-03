@@ -68,8 +68,8 @@ pub fn read_bundle_install_stamp(bundle_root: &Path) -> Result<Option<BundleInst
     if stamp_path.exists() {
         let raw = fs::read_to_string(&stamp_path)
             .with_context(|| format!("Failed to read {}", stamp_path.display()))?;
-        let stamp: BundleInstallStamp =
-            serde_json::from_str(&raw).with_context(|| format!("Failed to parse {}", stamp_path.display()))?;
+        let stamp: BundleInstallStamp = serde_json::from_str(&raw)
+            .with_context(|| format!("Failed to parse {}", stamp_path.display()))?;
         return Ok(Some(stamp));
     }
 
@@ -79,8 +79,8 @@ pub fn read_bundle_install_stamp(bundle_root: &Path) -> Result<Option<BundleInst
     }
     let raw = fs::read_to_string(&legacy_path)
         .with_context(|| format!("Failed to read {}", legacy_path.display()))?;
-    let stamp: BundleInstallStamp =
-        serde_json::from_str(&raw).with_context(|| format!("Failed to parse {}", legacy_path.display()))?;
+    let stamp: BundleInstallStamp = serde_json::from_str(&raw)
+        .with_context(|| format!("Failed to parse {}", legacy_path.display()))?;
     Ok(Some(stamp))
 }
 
@@ -98,9 +98,7 @@ fn install_state_path() -> Result<PathBuf> {
     let base = dirs::data_local_dir()
         .or_else(dirs::data_dir)
         .ok_or_else(|| anyhow!("Unable to resolve local application data directory"))?;
-    let new_path = base
-        .join("Moaz Elgabry Plugins")
-        .join("install-state.json");
+    let new_path = base.join("Moaz Elgabry Plugins").join("install-state.json");
     let legacy_path = base
         .join("MoazElgabryPluginManager")
         .join("install-state.json");
@@ -315,10 +313,15 @@ fn parse_package_source_spec(raw: &str) -> PackageSourceSpec {
 }
 
 fn ensure_supported_package(package: &PlatformPackage) -> Result<()> {
-    if package.package_type != "zip" && package.package_type != "bundle-dir" && package.package_type != "tar.gz" {
+    if package.package_type != "zip"
+        && package.package_type != "bundle-dir"
+        && package.package_type != "tar.gz"
+    {
         bail!("Only zip, tar.gz, and bundle-dir plugin packages are supported in v1");
     }
-    if (package.package_type == "zip" || package.package_type == "tar.gz") && package.sha256.starts_with("REPLACE_") {
+    if (package.package_type == "zip" || package.package_type == "tar.gz")
+        && package.sha256.starts_with("REPLACE_")
+    {
         bail!("The manifest for this plugin still contains a placeholder checksum.");
     }
     Ok(())
@@ -468,17 +471,23 @@ fn extract_zip(bytes: &[u8], destination: &Path) -> Result<()> {
         if should_skip_zip_entry(&relative) {
             continue;
         }
-        validate_zip_entry_path(&relative)
-            .with_context(|| format!("Archive entry '{}' could not be extracted safely", file.name()))?;
+        validate_zip_entry_path(&relative).with_context(|| {
+            format!(
+                "Archive entry '{}' could not be extracted safely",
+                file.name()
+            )
+        })?;
         let output = destination.join(relative);
         if zip_entry_is_dir(&file) {
-            fs::create_dir_all(&output)
-                .with_context(|| format!("Failed to create extracted directory {}", output.display()))?;
+            fs::create_dir_all(&output).with_context(|| {
+                format!("Failed to create extracted directory {}", output.display())
+            })?;
             continue;
         }
         if let Some(parent) = output.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create parent directory {}", parent.display()))?;
+            fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create parent directory {}", parent.display())
+            })?;
         }
         let mut writer = fs::File::create(&output)
             .with_context(|| format!("Failed to create extracted file {}", output.display()))?;
@@ -509,10 +518,19 @@ fn validate_zip_entry_path(path: &Path) -> Result<()> {
                 continue;
             }
             if name.ends_with(' ') || name.ends_with('.') {
-                bail!("Windows archive entry component '{}' ends with an invalid character", name);
+                bail!(
+                    "Windows archive entry component '{}' ends with an invalid character",
+                    name
+                );
             }
-            if name.chars().any(|ch| matches!(ch, '<' | '>' | ':' | '"' | '|' | '?' | '*')) {
-                bail!("Windows archive entry component '{}' contains characters invalid on Windows", name);
+            if name
+                .chars()
+                .any(|ch| matches!(ch, '<' | '>' | ':' | '"' | '|' | '?' | '*'))
+            {
+                bail!(
+                    "Windows archive entry component '{}' contains characters invalid on Windows",
+                    name
+                );
             }
         }
     }
@@ -528,11 +546,17 @@ fn extract_tar_gz(bytes: &[u8], destination: &Path) -> Result<()> {
     let decoder = GzDecoder::new(reader);
     let mut archive = Archive::new(decoder);
 
-    for entry in archive.entries().context("Downloaded archive was not a valid tar.gz")? {
+    for entry in archive
+        .entries()
+        .context("Downloaded archive was not a valid tar.gz")?
+    {
         let mut entry = entry?;
-        entry
-            .unpack_in(destination)
-            .with_context(|| format!("Failed to extract archive entry into {}", destination.display()))?;
+        entry.unpack_in(destination).with_context(|| {
+            format!(
+                "Failed to extract archive entry into {}",
+                destination.display()
+            )
+        })?;
     }
 
     Ok(())
@@ -581,20 +605,14 @@ fn verify_bundle(bundle_root: &Path, package: &PlatformPackage) -> Result<()> {
             if win64_binary.exists() {
                 return Ok(());
             }
-            bail!(
-                "Windows bundle did not contain {}",
-                win64_binary.display()
-            );
+            bail!("Windows bundle did not contain {}", win64_binary.display());
         }
         if package.platform == "linux" {
             let linux_binary = linux_bundle_binary_path(bundle_root, package)?;
             if linux_binary.exists() {
                 return Ok(());
             }
-            bail!(
-                "Linux bundle did not contain {}",
-                linux_binary.display()
-            );
+            bail!("Linux bundle did not contain {}", linux_binary.display());
         }
         bail!("Bundle did not contain Contents/Info.plist");
     }
@@ -645,11 +663,7 @@ fn privileged_install_windows(
     bundle_name: &str,
     simulate_fail_after_backup: bool,
 ) -> Result<()> {
-    let token = format!(
-        "{}-{}",
-        std::process::id(),
-        Utc::now().timestamp_millis()
-    );
+    let token = format!("{}-{}", std::process::id(), Utc::now().timestamp_millis());
     let script_dir = std::env::temp_dir().join("Moaz Elgabry Plugins");
     fs::create_dir_all(&script_dir)
         .with_context(|| format!("Failed to create {}", script_dir.display()))?;
@@ -724,7 +738,13 @@ catch {{
     );
 
     let mut command = Command::new("powershell.exe");
-    command.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &outer_command]);
+    command.args([
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        &outer_command,
+    ]);
     #[cfg(target_os = "windows")]
     command.creation_flags(CREATE_NO_WINDOW);
     let status = command
@@ -767,11 +787,7 @@ catch {{
 }
 
 fn privileged_uninstall_windows(target_bundle: &Path, _bundle_name: &str) -> Result<()> {
-    let token = format!(
-        "{}-{}",
-        std::process::id(),
-        Utc::now().timestamp_millis()
-    );
+    let token = format!("{}-{}", std::process::id(), Utc::now().timestamp_millis());
     let script_dir = std::env::temp_dir().join("Moaz Elgabry Plugins");
     fs::create_dir_all(&script_dir)
         .with_context(|| format!("Failed to create {}", script_dir.display()))?;
@@ -821,7 +837,13 @@ Write-UninstallLog "Uninstall completed successfully"
     );
 
     let mut command = Command::new("powershell.exe");
-    command.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &outer_command]);
+    command.args([
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        &outer_command,
+    ]);
     #[cfg(target_os = "windows")]
     command.creation_flags(CREATE_NO_WINDOW);
     let status = command
@@ -870,7 +892,8 @@ fn privileged_install_macos(
 ) -> Result<()> {
     let script_dir = tempdir().context("Failed to create temp directory for installer script")?;
     let script_path = script_dir.path().join("install-plugin.sh");
-    let script = format!(r#"#!/bin/sh
+    let script = format!(
+        r#"#!/bin/sh
 set -e
 
 SOURCE_BUNDLE="$1"
@@ -945,13 +968,17 @@ trap - EXIT
         return Ok(());
     }
 
-    bail!("macOS installation was cancelled or failed with exit code {:?}", status.code())
+    bail!(
+        "macOS installation was cancelled or failed with exit code {:?}",
+        status.code()
+    )
 }
 
 fn privileged_uninstall_macos(target_bundle: &Path, bundle_name: &str) -> Result<()> {
     let script_dir = tempdir().context("Failed to create temp directory for uninstaller script")?;
     let script_path = script_dir.path().join("uninstall-plugin.sh");
-    let script = format!(r#"#!/bin/sh
+    let script = format!(
+        r#"#!/bin/sh
 set -e
 
 TARGET_BUNDLE="$1"
@@ -964,7 +991,8 @@ fi
 rm -f "$TARGET_BUNDLE/Contents/Resources/moaz-elgabry-plugins.install.json"
 rm -f "$TARGET_BUNDLE/Contents/Resources/moazelgabry-plugin-manager.install.json"
 rm -rf "$TARGET_BUNDLE"
-"#);
+"#
+    );
     fs::write(&script_path, script)
         .with_context(|| format!("Failed to write {}", script_path.display()))?;
     #[cfg(unix)]
@@ -997,7 +1025,10 @@ rm -rf "$TARGET_BUNDLE"
         return Ok(());
     }
 
-    bail!("macOS uninstall was cancelled or failed with exit code {:?}", status.code())
+    bail!(
+        "macOS uninstall was cancelled or failed with exit code {:?}",
+        status.code()
+    )
 }
 
 fn privileged_install_linux(
@@ -1006,9 +1037,11 @@ fn privileged_install_linux(
     bundle_name: &str,
     simulate_fail_after_backup: bool,
 ) -> Result<()> {
-    let pkexec = find_linux_pkexec()
-        .ok_or_else(|| anyhow!("pkexec executable was not found. A PolicyKit-capable environment is required."))?;
-    let script_dir = tempdir().context("Failed to create temp directory for Linux installer script")?;
+    let pkexec = find_linux_pkexec().ok_or_else(|| {
+        anyhow!("pkexec executable was not found. A PolicyKit-capable environment is required.")
+    })?;
+    let script_dir =
+        tempdir().context("Failed to create temp directory for Linux installer script")?;
     let script_path = script_dir.path().join("install-plugin.sh");
     let log_path = std::env::temp_dir()
         .join("Moaz Elgabry Plugins")
@@ -1119,9 +1152,11 @@ trap - EXIT
 }
 
 fn privileged_uninstall_linux(target_bundle: &Path, bundle_name: &str) -> Result<()> {
-    let pkexec = find_linux_pkexec()
-        .ok_or_else(|| anyhow!("pkexec executable was not found. A PolicyKit-capable environment is required."))?;
-    let script_dir = tempdir().context("Failed to create temp directory for Linux uninstaller script")?;
+    let pkexec = find_linux_pkexec().ok_or_else(|| {
+        anyhow!("pkexec executable was not found. A PolicyKit-capable environment is required.")
+    })?;
+    let script_dir =
+        tempdir().context("Failed to create temp directory for Linux uninstaller script")?;
     let script_path = script_dir.path().join("uninstall-plugin.sh");
     let log_path = std::env::temp_dir()
         .join("Moaz Elgabry Plugins")
@@ -1204,11 +1239,7 @@ fn find_linux_pkexec() -> Option<PathBuf> {
         return None;
     }
 
-    let candidates = [
-        "/usr/bin/pkexec",
-        "/bin/pkexec",
-        "/usr/local/bin/pkexec",
-    ];
+    let candidates = ["/usr/bin/pkexec", "/bin/pkexec", "/usr/local/bin/pkexec"];
     for candidate in candidates {
         let path = PathBuf::from(candidate);
         if path.exists() {

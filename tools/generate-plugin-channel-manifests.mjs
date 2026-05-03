@@ -273,13 +273,30 @@ async function buildReleaseFromGitHubRelease(config, release, options = {}) {
   };
 }
 
-function updateIndex(indexPath, pluginId, displayName, iconUrl) {
+function stableManifestUrlForPlugin(pluginId) {
+  return `https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugins/${pluginId}/stable.json`;
+}
+
+function betaManifestUrlForPlugin(pluginId) {
+  return `https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugins/${pluginId}/beta.json`;
+}
+
+function updateIndex(indexPath, pluginId, displayName, iconUrl, options = {}) {
   const index = readJson(indexPath);
   index.generatedAt = new Date().toISOString();
-  const manifestUrl = `https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugins/${pluginId}/stable.json`;
+  const stableManifestUrl = options.hasStable ? stableManifestUrlForPlugin(pluginId) : undefined;
+  const betaManifestUrl = options.hasBeta ? betaManifestUrlForPlugin(pluginId) : undefined;
+  const manifestUrl = stableManifestUrl || betaManifestUrl;
+  assert(manifestUrl, `${pluginId}: cannot update catalog index without a stable or beta manifest URL`);
   const entries = Array.isArray(index.plugins) ? [...index.plugins] : [];
   const existingIndex = entries.findIndex((entry) => entry.pluginId === pluginId);
   const nextEntry = { pluginId, displayName, manifestUrl };
+  if (stableManifestUrl) {
+    nextEntry.stableManifestUrl = stableManifestUrl;
+  }
+  if (betaManifestUrl) {
+    nextEntry.betaManifestUrl = betaManifestUrl;
+  }
   if (iconUrl) {
     nextEntry.iconUrl = iconUrl;
   }
@@ -307,32 +324,38 @@ async function generateForConfig(configPath, releasesPath, managerRoot) {
   const stableGitHubReleases = allReleases.filter((release) => !release.prerelease);
   const betaGitHubReleases = allReleases.filter((release) => release.prerelease);
 
-  assert(stableGitHubReleases.length > 0, `${config.pluginId}: no published stable releases were found in ${config.releaseRepo}`);
+  assert(
+    stableGitHubReleases.length > 0 || betaGitHubReleases.length > 0,
+    `${config.pluginId}: no published releases were found in ${config.releaseRepo}`
+  );
 
-  const currentStableRelease = await buildReleaseFromGitHubRelease(config, stableGitHubReleases[0], {
-    requireFamilies: true
-  });
+  let stableManifest = null;
+  if (stableGitHubReleases.length > 0) {
+    const currentStableRelease = await buildReleaseFromGitHubRelease(config, stableGitHubReleases[0], {
+      requireFamilies: true
+    });
 
-  const availableStableMarker = config.availableStableMarker || "manager-available-stable";
-  const availableVersions = [];
-  for (const release of stableGitHubReleases.slice(1)) {
-    if (!parseBooleanMarker(release.body || "", availableStableMarker)) {
-      continue;
+    const availableStableMarker = config.availableStableMarker || "manager-available-stable";
+    const availableVersions = [];
+    for (const release of stableGitHubReleases.slice(1)) {
+      if (!parseBooleanMarker(release.body || "", availableStableMarker)) {
+        continue;
+      }
+      availableVersions.push(await buildReleaseFromGitHubRelease(config, release, { requireFamilies: false }));
     }
-    availableVersions.push(await buildReleaseFromGitHubRelease(config, release, { requireFamilies: false }));
-  }
 
-  const stableManifest = {
-    pluginId: config.pluginId,
-    displayName: config.displayName,
-    ...(iconUrl ? { iconUrl } : {}),
-    version: currentStableRelease.version,
-    releaseDate: currentStableRelease.releaseDate,
-    releaseNotesUrl: currentStableRelease.releaseNotesUrl,
-    releaseHighlights: currentStableRelease.releaseHighlights,
-    platforms: currentStableRelease.platforms,
-    availableVersions
-  };
+    stableManifest = {
+      pluginId: config.pluginId,
+      displayName: config.displayName,
+      ...(iconUrl ? { iconUrl } : {}),
+      version: currentStableRelease.version,
+      releaseDate: currentStableRelease.releaseDate,
+      releaseNotesUrl: currentStableRelease.releaseNotesUrl,
+      releaseHighlights: currentStableRelease.releaseHighlights,
+      platforms: currentStableRelease.platforms,
+      availableVersions
+    };
+  }
 
   let betaManifest = null;
   if (betaGitHubReleases.length > 0) {
@@ -357,14 +380,21 @@ async function generateForConfig(configPath, releasesPath, managerRoot) {
   const betaPath = path.join(pluginDir, "beta.json");
   const indexPath = path.join(managerRoot, "docs", "plugins", "index.json");
 
-  writeJson(stablePath, stableManifest);
+  if (stableManifest) {
+    writeJson(stablePath, stableManifest);
+  } else {
+    removeIfExists(stablePath);
+  }
   if (betaManifest) {
     writeJson(betaPath, betaManifest);
   } else {
     removeIfExists(betaPath);
   }
 
-  updateIndex(indexPath, config.pluginId, config.displayName, iconUrl);
+  updateIndex(indexPath, config.pluginId, config.displayName, iconUrl, {
+    hasStable: Boolean(stableManifest),
+    hasBeta: Boolean(betaManifest)
+  });
   console.log(`Generated manifests for ${config.pluginId} from ${config.releaseRepo}`);
 }
 
