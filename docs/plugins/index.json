@@ -1,10 +1,12 @@
 {
-  "generatedAt": "2026-05-03T19:24:05.307Z",
+  "generatedAt": "2026-05-04T19:52:23.043Z",
   "plugins": [
     {
       "pluginId": "chromaspace",
       "displayName": "Chromaspace",
       "manifestUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugins/chromaspace/stable.json",
+      "stableManifestUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugins/chromaspace/stable.json",
+      "betaManifestUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugins/chromaspace/beta.json",
       "iconUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugin-icons/chromaspace.png"
     },
     {
