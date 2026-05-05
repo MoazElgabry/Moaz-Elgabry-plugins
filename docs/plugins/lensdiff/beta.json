@@ -5,7 +5,7 @@
   "version": "0.2.10",
   "releaseDate": "2026-05-01T01:49:41Z",
   "releaseNotesUrl": "https://github.com/MoazElgabry/LensDiff/releases/tag/lensdiff-draft-v0.2.10",
-  "releaseHighlights": "CRASHES ON MAC\nLensDiff is an OpenFX plugin repo for physically inspired diffraction, phase, spectral, and finishing controls.\n\n- Physically inspired lens diffraction rendering for highlight spread, streaks, and structured bloom\n- Aperture controls for shape, blade count, roundness, rotation, obstruction, vanes, and custom apertures\n- Phase controls for defocus, astigmatism, coma, spherical, and higher-order aberrations\n- Field variation controls so the effect can change across the image area\n- Spectrum controls for monochromatic or chromatic diffraction behavior\n- Finishing controls for final look adjustment\n- Built-in presets for common starting points\n- Resolution-aware mode for more consistent results across output sizes",
+  "releaseHighlights": "Note : CRASHES ON MAC\n\nLensDiff is an OpenFX plugin repo for physically inspired diffraction, phase, spectral, and finishing controls.\n\n- Physically inspired lens diffraction rendering for highlight spread, streaks, and structured bloom\n- Aperture controls for shape, blade count, roundness, rotation, obstruction, vanes, and custom apertures\n- Phase controls for defocus, astigmatism, coma, spherical, and higher-order aberrations\n- Field variation controls so the effect can change across the image area\n- Spectrum controls for monochromatic or chromatic diffraction behavior\n- Finishing controls for final look adjustment\n- Built-in presets for common starting points\n- Resolution-aware mode for more consistent results across output sizes",
   "platforms": [
     {
       "platform": "windows",
