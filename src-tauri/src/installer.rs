@@ -737,7 +737,7 @@ catch {{
         escape_ps(&log_path.display().to_string())
     );
 
-    let mut command = Command::new("powershell.exe");
+    let mut command = Command::new(windows_powershell_exe());
     command.args([
         "-NoProfile",
         "-ExecutionPolicy",
@@ -836,7 +836,7 @@ Write-UninstallLog "Uninstall completed successfully"
         escape_ps(&log_path.display().to_string())
     );
 
-    let mut command = Command::new("powershell.exe");
+    let mut command = Command::new(windows_powershell_exe());
     command.args([
         "-NoProfile",
         "-ExecutionPolicy",
@@ -1247,6 +1247,28 @@ fn find_linux_pkexec() -> Option<PathBuf> {
         }
     }
     None
+}
+
+fn windows_powershell_exe() -> PathBuf {
+    for variable in ["SystemRoot", "WINDIR"] {
+        if let Some(root) = std::env::var_os(variable) {
+            let candidate = PathBuf::from(root)
+                .join("System32")
+                .join("WindowsPowerShell")
+                .join("v1.0")
+                .join("powershell.exe");
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+    }
+
+    let default = PathBuf::from(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe");
+    if default.exists() {
+        return default;
+    }
+
+    PathBuf::from("powershell.exe")
 }
 
 fn escape_ps(raw: &str) -> String {

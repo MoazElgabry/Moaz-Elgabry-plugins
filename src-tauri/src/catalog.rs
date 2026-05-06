@@ -761,10 +761,13 @@ fn entry_stable_manifest_url(entry: &CatalogEntry) -> Option<&str> {
 }
 
 fn entry_beta_manifest_url(entry: &CatalogEntry) -> Option<String> {
-    entry
-        .beta_manifest_url
-        .clone()
-        .or_else(|| entry_stable_manifest_url(entry).and_then(beta_manifest_url))
+    entry.beta_manifest_url.clone().or_else(|| {
+        if entry.manifest_url.ends_with("/beta.json") || entry.manifest_url.ends_with("\\beta.json") {
+            Some(entry.manifest_url.clone())
+        } else {
+            entry_stable_manifest_url(entry).and_then(beta_manifest_url)
+        }
+    })
 }
 
 #[cfg(test)]

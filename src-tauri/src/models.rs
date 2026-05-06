@@ -301,6 +301,20 @@ fn classify_error<'a>(
         );
     }
 
+    if details.contains("Failed to start elevated PowerShell installer") {
+        return (
+            "install_start_failed",
+            "The plugin installer could not be started.",
+        );
+    }
+
+    if details.contains("Failed to start elevated PowerShell uninstaller") {
+        return (
+            "uninstall_start_failed",
+            "The plugin uninstaller could not be started.",
+        );
+    }
+
     if details.contains("uninstall failed") || details.contains("Failed to start elevated") {
         return (
             "uninstall_failed",
