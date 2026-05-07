@@ -2,16 +2,16 @@
   "pluginId": "chromaspace",
   "displayName": "Chromaspace",
   "iconUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugin-icons/chromaspace.png",
-  "version": "1.0.10",
-  "releaseDate": "2026-05-04T19:52:03Z",
-  "releaseNotesUrl": "https://github.com/MoazElgabry/Chromaspace/releases/tag/1.0.10",
-  "releaseHighlights": "- Significant performance improvements on CUDA systems, up to 3.9x faster.\n- Improved performance on Metal.\n- Added support for 1000 series Nvidia GPUs.\n- Added a new smart scheduler for a balanced refresh rate in the viewer and playback.\n- Enabled dynamic updates even when the plugin is on the clip level.\n- Improved visibility with larger point sizes and denser plots.\n- Organized the settings tab.\n- Added new default and preset options for user customization.\n- Added a saturation slider to control how colorful the plot is.\n- Added a snap to orthogonal view hot key \"s\"\n- Added experimental Gloss view plotting mode\n- Fixed the scheduler for better rerponse to updateas",
+  "version": "1.0.11",
+  "releaseDate": "2026-05-07T22:11:53Z",
+  "releaseNotesUrl": "https://github.com/MoazElgabry/Chromaspace/releases/tag/1.0.11",
+  "releaseHighlights": "- Added an option in settings to reset the camera view when switching models.\n- Resuming the connection after minimizing the viewer is fixed.\n- Improved the response of the Neutral radius slider.",
   "platforms": [
     {
       "platform": "windows",
       "arch": "x86_64",
-      "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/1.0.10/Chromaspace_v1.0.10_windows_x86_64_portable.zip",
-      "sha256": "936ec765dba868c092496fedd9abc808c3c1d9ed0d851c2f20b9ee05865ad175",
+      "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/1.0.11/Chromaspace_v1.0.11_windows_x86_64_portable.zip",
+      "sha256": "e90582d14f0638ca059eea3f3a1c7e0866b2bd805a81920e71e75f3500888bb4",
       "packageType": "zip",
       "bundleName": "Chromaspace.ofx.bundle",
       "bundleIdentifier": "com.moazelgabry.Chromaspace",
@@ -31,8 +31,8 @@
     {
       "platform": "macos",
       "arch": "universal",
-      "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/1.0.10/Chromaspace_v1.0.10_macOS_universal_portable.zip",
-      "sha256": "f7cbe101971019ac63f8c456ad8587b65e8b979b3bdd267b8ee0a599124e857b",
+      "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/1.0.11/Chromaspace_v1.0.11_macOS_universal_portable.zip",
+      "sha256": "7df38fb80d9931463a327ef29f5d6ad4ca6882fcde5e6c077a10415389e22039",
       "packageType": "zip",
       "bundleName": "Chromaspace.ofx.bundle",
       "bundleIdentifier": "com.moazelgabry.Chromaspace",
@@ -52,8 +52,8 @@
     {
       "platform": "linux",
       "arch": "x86_64",
-      "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/1.0.10/Chromaspace_v1.0.10_linux_x86_64_cuda_opencl_cpu_portable.tar.gz",
-      "sha256": "7c168a17c7f0608508dac29937d48203cc76032572d9b6a75536eda5d867cbbd",
+      "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/1.0.11/Chromaspace_v1.0.11_linux_x86_64_cuda_opencl_cpu_portable.tar.gz",
+      "sha256": "8637127278230492c6a655428f22d1cc153f7344ddc44e254fab0a11a9cdf152",
       "packageType": "tar.gz",
       "bundleName": "Chromaspace.ofx.bundle",
       "bundleIdentifier": "com.moazelgabry.Chromaspace",
@@ -196,76 +196,6 @@
           "arch": "x86_64",
           "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/chromaspace-draft-v1.0.1/Chromaspace_v1.0.1_linux_x86_64_cuda_opencl_cpu_portable.tar.gz",
           "sha256": "1a68cd737713f7c8474f58956563b6568c4e196ec81b6c7ec136ba467c9374ae",
-          "packageType": "tar.gz",
-          "bundleName": "Chromaspace.ofx.bundle",
-          "bundleIdentifier": "com.moazelgabry.Chromaspace",
-          "installPath": "/usr/OFX/Plugins",
-          "minManagerVersion": "0.1.0",
-          "hostProcesses": [
-            "Resolve",
-            "DaVinci Resolve",
-            "Fusion",
-            "Fusion Studio",
-            "Nuke",
-            "NukeX",
-            "NukeStudio",
-            "Hiero"
-          ]
-        }
-      ]
-    },
-    {
-      "version": "1.0.0b2",
-      "releaseDate": "2026-03-21T12:54:34Z",
-      "releaseNotesUrl": "https://github.com/MoazElgabry/Chromaspace/releases/tag/v1.0.0b2",
-      "platforms": [
-        {
-          "platform": "windows",
-          "arch": "x86_64",
-          "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/v1.0.0b2/Chromaspace_v1.0.0b2_windows_x86_64_portable.zip",
-          "sha256": "208723e27317643e76be2561d65aa6650e5d65f0bf49eb6bb2d5b8ccf4c62e2f",
-          "packageType": "zip",
-          "bundleName": "Chromaspace.ofx.bundle",
-          "bundleIdentifier": "com.moazelgabry.Chromaspace",
-          "installPath": "C:\\Program Files\\Common Files\\OFX\\Plugins",
-          "minManagerVersion": "0.1.0",
-          "hostProcesses": [
-            "Resolve",
-            "DaVinci Resolve",
-            "Fusion",
-            "Fusion Studio",
-            "Nuke",
-            "NukeX",
-            "NukeStudio",
-            "Hiero"
-          ]
-        },
-        {
-          "platform": "macos",
-          "arch": "universal",
-          "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/v1.0.0b2/Chromaspace_v1.0.0b2_macOS_universal_portable.zip",
-          "sha256": "f14f3dffce0b6b0bb638bd7bd68abb924255ffd036cdce59f8b85be35c88c5ad",
-          "packageType": "zip",
-          "bundleName": "Chromaspace.ofx.bundle",
-          "bundleIdentifier": "com.moazelgabry.Chromaspace",
-          "installPath": "/Library/OFX/Plugins",
-          "minManagerVersion": "0.1.0",
-          "hostProcesses": [
-            "Resolve",
-            "DaVinci Resolve",
-            "Fusion",
-            "Fusion Studio",
-            "Nuke",
-            "NukeX",
-            "NukeStudio",
-            "Hiero"
-          ]
-        },
-        {
-          "platform": "linux",
-          "arch": "x86_64",
-          "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/v1.0.0b2/Chromaspace_v1.0.0b2_linux_x86_64_portable.tar.gz",
-          "sha256": "39d7a3cbadc176b8207732c6ade81446d5b6c8a1ee2bc17f4dcda3589f17619c",
           "packageType": "tar.gz",
           "bundleName": "Chromaspace.ofx.bundle",
           "bundleIdentifier": "com.moazelgabry.Chromaspace",
