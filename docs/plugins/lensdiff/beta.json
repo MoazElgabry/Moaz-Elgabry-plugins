@@ -2,16 +2,28 @@
   "pluginId": "lensdiff",
   "displayName": "LensDiff",
   "iconUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugin-icons/lensdiff.png",
-  "version": "0.2.10",
-  "releaseDate": "2026-05-01T01:49:41Z",
-  "releaseNotesUrl": "https://github.com/MoazElgabry/LensDiff/releases/tag/lensdiff-draft-v0.2.10",
+  "version": "0.2.11",
+  "releaseDate": "2026-05-13T20:06:40Z",
+  "releaseNotesUrl": "https://github.com/MoazElgabry/LensDiff/releases/tag/lensdiff-draft-v0.2.11",
   "releaseHighlights": "Note : CRASHES ON MAC\n\nLensDiff is an OFX plugin for physically inspired diffraction, phase, spectral, and finishing controls.\n\n- Physically inspired lens diffraction rendering for highlight spread, streaks, and structured bloom\n- Aperture controls for shape, blade count, roundness, rotation, obstruction, vanes, and custom apertures\n- Phase controls for defocus, astigmatism, coma, spherical, and higher-order aberrations\n- Field variation controls so the effect can change across the image area\n- Spectrum controls for monochromatic or chromatic diffraction behavior\n- Finishing controls for final look adjustment\n- Built-in presets for common starting points\n- Resolution-aware mode for more consistent results across output sizes",
+  "diagnostics": {
+    "enabled": true,
+    "logSourcePath": {
+      "windows": "%LOCALAPPDATA%\\LensDiff\\Logs\\LensDiff.log",
+      "macos": "~/Library/Logs/LensDiff.log",
+      "linux": "~/.local/state/LensDiff/LensDiff.log"
+    },
+    "environment": {
+      "LENSDIFF_LOG": "1",
+      "LENSDIFF_TIMING": "1"
+    }
+  },
   "platforms": [
     {
       "platform": "windows",
       "arch": "x86_64",
-      "downloadUrl": "https://github.com/MoazElgabry/LensDiff/releases/download/lensdiff-draft-v0.2.10/LensDiff_v0.2.10_windows_x86_64_portable.zip",
-      "sha256": "6899244230194eaa074f7a2024d804524c063a64a9f6c6df8e71349174e52a2d",
+      "downloadUrl": "https://github.com/MoazElgabry/LensDiff/releases/download/lensdiff-draft-v0.2.11/LensDiff_v0.2.11_windows_x86_64_portable.zip",
+      "sha256": "cbf0c5cc45b2d9f36720a17506eaabcd8013538fcd0ac86141403efbfaa4e73e",
       "packageType": "zip",
       "bundleName": "LensDiff.ofx.bundle",
       "bundleIdentifier": "com.moazelgabry.LensDiff",
@@ -31,8 +43,8 @@
     {
       "platform": "macos",
       "arch": "universal",
-      "downloadUrl": "https://github.com/MoazElgabry/LensDiff/releases/download/lensdiff-draft-v0.2.10/LensDiff_v0.2.10_macOS_universal_portable.zip",
-      "sha256": "c6448a1568552fd2a0cb2ada8e09b0aca5bce7337cd0a507f76e98e286fa481f",
+      "downloadUrl": "https://github.com/MoazElgabry/LensDiff/releases/download/lensdiff-draft-v0.2.11/LensDiff_v0.2.11_macOS_universal_portable.zip",
+      "sha256": "c2ac1dcb6558d13ee72fe25c599eff08a546e4be46f88bcdf65414f4c5404f30",
       "packageType": "zip",
       "bundleName": "LensDiff.ofx.bundle",
       "bundleIdentifier": "com.moazelgabry.LensDiff",
@@ -52,8 +64,8 @@
     {
       "platform": "linux",
       "arch": "x86_64",
-      "downloadUrl": "https://github.com/MoazElgabry/LensDiff/releases/download/lensdiff-draft-v0.2.10/LensDiff_v0.2.10_linux_x86_64_cuda_cpu_portable.tar.gz",
-      "sha256": "866570db6a5c9c1ef3fbbbd782707ae056508d4f1d50645cdbfd7262d5ce23da",
+      "downloadUrl": "https://github.com/MoazElgabry/LensDiff/releases/download/lensdiff-draft-v0.2.11/LensDiff_v0.2.11_linux_x86_64_cuda_cpu_portable.tar.gz",
+      "sha256": "877f1a02964904663c49caf6c05b9231b43d00351b89bee241cd0b135b568c0e",
       "packageType": "tar.gz",
       "bundleName": "LensDiff.ofx.bundle",
       "bundleIdentifier": "com.moazelgabry.LensDiff",
