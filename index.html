@@ -124,5 +124,31 @@
         </div>
       </div>
     </dialog>
+
+    <dialog id="diagnostics-export-dialog" class="diagnostics-export-dialog">
+      <div class="diagnostics-export-shell">
+        <div class="diagnostics-export-header">
+          <div class="diagnostics-export-icon" aria-hidden="true">i</div>
+          <div>
+            <p class="eyebrow">Export diagnostics logs</p>
+            <h3 id="diagnostics-export-title"></h3>
+          </div>
+        </div>
+        <div class="diagnostics-export-body">
+          <p id="diagnostics-export-copy"></p>
+          <label class="diagnostics-cleanup-toggle" for="diagnostics-clear-logs">
+            <input id="diagnostics-clear-logs" type="checkbox" />
+            <span>
+              <strong>Remove previous logs first</strong>
+              <small>Clears existing files from this plugin's configured log locations before Resolve starts.</small>
+            </span>
+          </label>
+        </div>
+        <div class="diagnostics-export-footer">
+          <button id="diagnostics-export-start" class="primary" type="button">Choose export folder</button>
+          <button id="diagnostics-export-cancel" class="ghost-button" type="button">Cancel</button>
+        </div>
+      </div>
+    </dialog>
   </body>
 </html>

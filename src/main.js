@@ -1,4 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
 import "./styles.css";
@@ -29,7 +31,13 @@ const elements = {
   releaseHighlightsTitle: document.querySelector("#release-highlights-title"),
   releaseHighlightsBody: document.querySelector("#release-highlights-body"),
   releaseHighlightsLink: document.querySelector("#release-highlights-link"),
-  releaseHighlightsClose: document.querySelector("#release-highlights-close")
+  releaseHighlightsClose: document.querySelector("#release-highlights-close"),
+  diagnosticsExportDialog: document.querySelector("#diagnostics-export-dialog"),
+  diagnosticsExportTitle: document.querySelector("#diagnostics-export-title"),
+  diagnosticsExportCopy: document.querySelector("#diagnostics-export-copy"),
+  diagnosticsClearLogs: document.querySelector("#diagnostics-clear-logs"),
+  diagnosticsExportStart: document.querySelector("#diagnostics-export-start"),
+  diagnosticsExportCancel: document.querySelector("#diagnostics-export-cancel")
 };
 
 function logActivity(message) {
@@ -56,6 +64,13 @@ function operationSteps(kind) {
   if (kind === "plugin-uninstall") {
     return ["Preparing uninstall", "Removing installed bundle", "Cleaning manager records", "Refreshing plugin status"];
   }
+  if (kind === "plugin-logs") {
+    return [
+      "Launching Resolve for diagnostics",
+      "Reproduce the issue, then close Resolve",
+      "Collecting logs after Resolve closes"
+    ];
+  }
   return ["Preparing package", "Downloading package", "Installing plugin", "Refreshing plugin status"];
 }
 
@@ -69,14 +84,16 @@ function startOperation(kind, pluginId = null, label = "Working") {
     stepIndex: 0
   };
 
-  state.activeOperation.timer = window.setInterval(() => {
-    if (!state.activeOperation || state.activeOperation.kind !== kind || state.activeOperation.pluginId !== pluginId) {
-      return;
-    }
-    const lastStep = state.activeOperation.steps.length - 1;
-    state.activeOperation.stepIndex = Math.min(state.activeOperation.stepIndex + 1, lastStep);
-    renderPlugins();
-  }, 1400);
+  if (kind !== "plugin-logs") {
+    state.activeOperation.timer = window.setInterval(() => {
+      if (!state.activeOperation || state.activeOperation.kind !== kind || state.activeOperation.pluginId !== pluginId) {
+        return;
+      }
+      const lastStep = state.activeOperation.steps.length - 1;
+      state.activeOperation.stepIndex = Math.min(state.activeOperation.stepIndex + 1, lastStep);
+      renderPlugins();
+    }, 1400);
+  }
 
   renderPlugins();
 }
@@ -234,6 +251,60 @@ function closeReleaseHighlightsDialog() {
   }
 }
 
+function showDiagnosticsExportDialog(displayName) {
+  elements.diagnosticsExportTitle.textContent = displayName;
+  elements.diagnosticsExportCopy.textContent =
+    "This will start DaVinci Resolve in diagnostics mode. After Resolve opens, reproduce the issue you want to report, then close Resolve. The manager will collect the generated logs after Resolve closes.";
+  elements.diagnosticsClearLogs.checked = false;
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const cleanup = () => {
+      elements.diagnosticsExportStart.removeEventListener("click", handleStart);
+      elements.diagnosticsExportCancel.removeEventListener("click", handleCancel);
+      elements.diagnosticsExportDialog.removeEventListener("cancel", handleCancel);
+      elements.diagnosticsExportDialog.removeEventListener("click", handleBackdropClick);
+      elements.diagnosticsExportDialog.removeEventListener("close", handleClose);
+    };
+    const settle = (value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(value);
+    };
+    const closeDialog = () => {
+      if (elements.diagnosticsExportDialog.open) {
+        elements.diagnosticsExportDialog.close();
+      }
+    };
+    const handleStart = () => {
+      const removePreviousLogs = elements.diagnosticsClearLogs.checked;
+      settle({ removePreviousLogs });
+      closeDialog();
+    };
+    const handleCancel = (event) => {
+      event?.preventDefault();
+      settle(null);
+      closeDialog();
+    };
+    const handleBackdropClick = (event) => {
+      if (event.target === elements.diagnosticsExportDialog) {
+        handleCancel(event);
+      }
+    };
+    const handleClose = () => {
+      settle(null);
+    };
+
+    elements.diagnosticsExportStart.addEventListener("click", handleStart);
+    elements.diagnosticsExportCancel.addEventListener("click", handleCancel);
+    elements.diagnosticsExportDialog.addEventListener("cancel", handleCancel);
+    elements.diagnosticsExportDialog.addEventListener("click", handleBackdropClick);
+    elements.diagnosticsExportDialog.addEventListener("close", handleClose);
+    elements.diagnosticsExportDialog.showModal();
+  });
+}
+
 function statusClass(status) {
   if (status === "Installed" || status === "Up to date") return "ok";
   if (
@@ -375,11 +446,12 @@ function pluginOperationMarkup(plugin) {
   if (!operation || operation.pluginId !== plugin.pluginId) return "";
 
   const step = operation.steps[operation.stepIndex] ?? operation.label;
+  const showStep = step && step !== operation.label;
   return `
     <div class="plugin-progress" role="status" aria-live="polite">
       <div class="plugin-progress-copy">
         <p class="plugin-progress-label">${operation.label}</p>
-        <p class="plugin-progress-step">${step}</p>
+        ${showStep ? `<p class="plugin-progress-step">${step}</p>` : ""}
       </div>
       <div class="plugin-progress-bar" aria-hidden="true">
         <span class="plugin-progress-fill"></span>
@@ -451,6 +523,31 @@ function pluginIconMarkup(plugin) {
     <div class="plugin-icon plugin-icon-fallback" aria-hidden="true">
       <span>${initial}</span>
     </div>
+  `;
+}
+
+function diagnosticsButtonMarkup(className = "") {
+  const resolvedClassName = className ? `diagnostics-button ${className}` : "diagnostics-button";
+  return `
+    <button
+      type="button"
+      class="${resolvedClassName}"
+      aria-label="Export diagnostics logs"
+      title="Export diagnostics logs"
+    >
+      <span class="diagnostics-icon" aria-hidden="true"></span>
+    </button>
+  `;
+}
+
+function diagnosticsAvailable(plugin) {
+  return Boolean(plugin.installed && plugin.diagnostics?.enabled);
+}
+
+function pluginNameMarkup(plugin) {
+  return `
+    <span>${escapeHtml(plugin.displayName)}</span>
+    ${plugin.betaRelease ? '<span class="plugin-beta-tag">Beta</span>' : ""}
   `;
 }
 
@@ -567,13 +664,12 @@ function renderPlugins() {
     const primaryRequest = actionRequest(plugin);
     const helperText = actionHelperText(plugin, primaryLabel);
     const showLatestInfo = hasReleaseHighlights(plugin.releaseHighlights);
+    const showDiagnostics = diagnosticsAvailable(plugin);
     card.innerHTML = `
       <header>
         <div class="plugin-heading">
           ${pluginIconMarkup(plugin)}
-          <div>
-          <h3>${plugin.displayName}</h3>
-          </div>
+          <h3>${pluginNameMarkup(plugin)}</h3>
         </div>
         <span class="status-pill ${statusClass(plugin.status)} ${plugin.status === "Ready to install" ? "ready" : ""}">${plugin.status}</span>
       </header>
@@ -604,7 +700,10 @@ function renderPlugins() {
             ? `<p class="action-helper">${helperText}</p>`
             : '<span class="action-helper-placeholder" aria-hidden="true"></span>'
         }
-        ${showLatestInfo ? releaseInfoButtonMarkup("main-action-info-button") : ""}
+        <div class="plugin-action-icons">
+          ${showDiagnostics ? diagnosticsButtonMarkup("main-action-diagnostics-button") : ""}
+          ${showLatestInfo ? releaseInfoButtonMarkup("main-action-info-button") : ""}
+        </div>
       </div>
       ${pluginOperationMarkup(plugin)}
     `;
@@ -622,6 +721,12 @@ function renderPlugins() {
           releaseNotesUrl: plugin.releaseNotesUrl,
           releaseHighlights: plugin.releaseHighlights
         });
+      });
+    }
+    const diagnosticsButton = card.querySelector(".main-action-diagnostics-button");
+    if (diagnosticsButton) {
+      diagnosticsButton.addEventListener("click", async () => {
+        await exportPluginLogs(plugin.pluginId);
       });
     }
 
@@ -816,6 +921,74 @@ async function checkForManagerUpdates() {
   }
 }
 
+async function exportPluginLogs(pluginId) {
+  const plugin = state.dashboard?.plugins?.find((item) => item.pluginId === pluginId);
+  const displayName = plugin?.displayName ?? pluginId;
+
+  try {
+    await invoke("check_plugin_log_export_ready", { pluginId });
+  } catch (error) {
+    const parsed = parseUiError(error, `Couldn't start diagnostics logs for ${displayName}.`);
+    showAlert(parsed);
+    logActivity(`${pluginId}: ${parsed.summary}`);
+    return;
+  }
+
+  let diagnosticsOptions = null;
+  try {
+    diagnosticsOptions = await showDiagnosticsExportDialog(displayName);
+  } catch (error) {
+    const parsed = parseUiError(error, "Couldn't show the diagnostics instructions.");
+    showAlert(parsed);
+    logActivity(`${pluginId}: ${parsed.summary}`);
+    return;
+  }
+
+  if (!diagnosticsOptions) {
+    return;
+  }
+
+  let destinationDir = null;
+  try {
+    destinationDir = await open({
+      directory: true,
+      multiple: false,
+      title: "Choose where to export plugin logs"
+    });
+  } catch (error) {
+    const parsed = parseUiError(error, "Couldn't open the folder picker.");
+    showAlert(parsed);
+    logActivity(`${pluginId}: ${parsed.summary}`);
+    return;
+  }
+
+  if (!destinationDir) {
+    return;
+  }
+
+  startOperation("plugin-logs", pluginId, "Launching Resolve for diagnostics");
+  setBusy(true);
+  try {
+    hideAlert();
+    const cleanupNote = diagnosticsOptions.removePreviousLogs ? " Previous logs will be removed first." : "";
+    logActivity(`${pluginId}: Starting diagnostics session.${cleanupNote} Close Resolve when you finish reproducing the issue.`);
+    const result = await invoke("export_plugin_logs", {
+      pluginId,
+      destinationDir,
+      removePreviousLogs: diagnosticsOptions.removePreviousLogs
+    });
+    logActivity(`${result.pluginId}: ${result.message}`);
+    await refreshDashboard();
+  } catch (error) {
+    const parsed = parseUiError(error, `Couldn't export diagnostics logs for ${pluginId}.`);
+    showAlert(parsed);
+    logActivity(`${pluginId}: ${parsed.summary}`);
+  } finally {
+    finishOperation();
+    setBusy(false);
+  }
+}
+
 async function openSupportLink() {
   try {
     await invoke("open_support_link");
@@ -842,6 +1015,25 @@ elements.releaseHighlightsDialog.addEventListener("click", (event) => {
   if (event.target === elements.releaseHighlightsDialog) {
     closeReleaseHighlightsDialog();
   }
+});
+
+listen("plugin-log-export-progress", (event) => {
+  const progress = event.payload;
+  if (
+    !progress ||
+    state.activeOperation?.kind !== "plugin-logs" ||
+    state.activeOperation.pluginId !== progress.pluginId
+  ) {
+    return;
+  }
+
+  updateOperationProgress({
+    label: progress.label,
+    steps: progress.steps,
+    stepIndex: progress.stepIndex
+  });
+}).catch((error) => {
+  logActivity(`Diagnostics progress updates unavailable: ${String(error)}`);
 });
 
 refreshDashboard();

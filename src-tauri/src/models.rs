@@ -28,6 +28,7 @@ pub struct PluginStatus {
     pub display_name: String,
     pub icon_url: Option<String>,
     pub latest_version: String,
+    pub beta_release: bool,
     pub installed_version: Option<String>,
     pub install_path: String,
     pub bundle_name: String,
@@ -40,6 +41,7 @@ pub struct PluginStatus {
     pub status: String,
     pub release_notes_url: String,
     pub release_highlights: Option<String>,
+    pub diagnostics: Option<PluginDiagnostics>,
     pub available_versions: Vec<VersionOption>,
 }
 
@@ -50,6 +52,32 @@ pub struct PluginOperationResult {
     pub action: String,
     pub status: String,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginDiagnostics {
+    pub enabled: bool,
+    #[serde(default)]
+    pub log_source_path: BTreeMap<String, DiagnosticsLogSource>,
+    #[serde(default)]
+    pub environment: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum DiagnosticsLogSource {
+    Single(String),
+    Multiple(Vec<String>),
+}
+
+impl DiagnosticsLogSource {
+    pub fn as_slice(&self) -> &[String] {
+        match self {
+            Self::Single(value) => std::slice::from_ref(value),
+            Self::Multiple(values) => values.as_slice(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -82,6 +110,8 @@ pub struct PluginManifest {
     pub release_date: String,
     pub release_notes_url: String,
     pub release_highlights: Option<String>,
+    #[serde(default)]
+    pub diagnostics: Option<PluginDiagnostics>,
     pub platforms: Vec<PlatformPackage>,
     #[serde(default)]
     pub available_versions: Vec<PluginRelease>,
@@ -94,6 +124,8 @@ pub struct PluginRelease {
     pub release_date: String,
     pub release_notes_url: String,
     pub release_highlights: Option<String>,
+    #[serde(default)]
+    pub diagnostics: Option<PluginDiagnostics>,
     pub platforms: Vec<PlatformPackage>,
 }
 
@@ -210,6 +242,20 @@ fn classify_error<'a>(
         return (
             "host_running",
             "Close any running supported host apps before installing or updating this plugin.",
+        );
+    }
+
+    if details.contains("Close Resolve before starting a diagnostics session") {
+        return (
+            "resolve_running",
+            "Close Resolve before starting a diagnostics session.",
+        );
+    }
+
+    if details.contains("Diagnostics are not enabled") {
+        return (
+            "diagnostics_unavailable",
+            "Diagnostics are not available for this plugin release.",
         );
     }
 
@@ -344,4 +390,47 @@ fn escape_json_string(raw: &str) -> String {
         .replace('"', "\\\"")
         .replace('\n', "\\n")
         .replace('\r', "\\r")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diagnostics_deserializes_single_and_multiple_log_sources() {
+        let diagnostics: PluginDiagnostics = serde_json::from_str(
+            r#"
+            {
+              "enabled": true,
+              "logSourcePath": {
+                "windows": "%LOCALAPPDATA%\\LensDiff\\Logs",
+                "macos": [
+                  "~/Library/Logs/ME_OpenDRT.log",
+                  "~/Library/Logs/ME_OpenDRT_CubeViewer.log"
+                ]
+              },
+              "environment": {
+                "PLUGIN_LOG": "1"
+              }
+            }
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            diagnostics
+                .log_source_path
+                .get("windows")
+                .unwrap()
+                .as_slice(),
+            &["%LOCALAPPDATA%\\LensDiff\\Logs".to_string()]
+        );
+        assert_eq!(
+            diagnostics.log_source_path.get("macos").unwrap().as_slice(),
+            &[
+                "~/Library/Logs/ME_OpenDRT.log".to_string(),
+                "~/Library/Logs/ME_OpenDRT_CubeViewer.log".to_string()
+            ]
+        );
+    }
 }

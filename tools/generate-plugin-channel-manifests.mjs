@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 function parseArgs(argv) {
   const args = {
@@ -159,8 +160,9 @@ function parseBooleanMarker(body, markerName) {
   }
 
   const escaped = markerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const pattern = new RegExp(`(^|\\n)\\s*${escaped}\\s*:\\s*true\\s*($|\\n)`, "i");
-  return pattern.test(body);
+  const visiblePattern = new RegExp(`(^|\\n)\\s*${escaped}\\s*:\\s*true\\s*($|\\n)`, "i");
+  const hiddenPattern = new RegExp(`<!--\\s*${escaped}\\s*:\\s*true\\s*-->`, "i");
+  return visiblePattern.test(body) || hiddenPattern.test(body);
 }
 
 function extractMarkedBlock(body, startMarker, endMarker) {
@@ -189,6 +191,83 @@ function extractReleaseHighlights(body) {
     "<!-- manager-highlights:start -->",
     "<!-- manager-highlights:end -->"
   );
+}
+
+function extractHiddenJsonComment(body, markerName) {
+  if (typeof body !== "string" || body.length === 0) {
+    return undefined;
+  }
+
+  const startMarker = `<!-- ${markerName}`;
+  const startIndex = body.indexOf(startMarker);
+  if (startIndex < 0) {
+    return undefined;
+  }
+
+  const contentStart = startIndex + startMarker.length;
+  const endIndex = body.indexOf("-->", contentStart);
+  assert(endIndex >= 0, `${markerName}: hidden JSON comment is missing a closing --> marker`);
+
+  const raw = body.slice(contentStart, endIndex).trim();
+  if (!raw) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`${markerName}: hidden JSON comment must contain valid JSON. ${error.message}`);
+  }
+}
+
+function validateStringMap(value, label) {
+  assert(value && typeof value === "object" && !Array.isArray(value), `${label} must be an object`);
+  for (const [key, item] of Object.entries(value)) {
+    assert(typeof key === "string" && key.length > 0, `${label} contains an empty key`);
+    assert(typeof item === "string" && item.length > 0, `${label}.${key} must be a non-empty string`);
+  }
+}
+
+function validateStringOrStringArrayMap(value, label) {
+  assert(value && typeof value === "object" && !Array.isArray(value), `${label} must be an object`);
+  for (const [key, item] of Object.entries(value)) {
+    assert(typeof key === "string" && key.length > 0, `${label} contains an empty key`);
+    if (Array.isArray(item)) {
+      assert(item.length > 0, `${label}.${key} must contain at least one path`);
+      for (const [index, pathItem] of item.entries()) {
+        assert(typeof pathItem === "string" && pathItem.length > 0, `${label}.${key}[${index}] must be a non-empty string`);
+      }
+      continue;
+    }
+    assert(typeof item === "string" && item.length > 0, `${label}.${key} must be a non-empty string or array of strings`);
+  }
+}
+
+function extractDiagnostics(body, releaseLabel) {
+  const diagnostics = extractHiddenJsonComment(body, "manager-diagnostics");
+  if (diagnostics === undefined) {
+    return undefined;
+  }
+
+  assert(
+    diagnostics && typeof diagnostics === "object" && !Array.isArray(diagnostics),
+    `${releaseLabel}: manager-diagnostics must be a JSON object`
+  );
+  assert(typeof diagnostics.enabled === "boolean", `${releaseLabel}: manager-diagnostics.enabled must be true or false`);
+  assert(
+    diagnostics.logSourcePath === undefined || diagnostics.logSourcePath,
+    `${releaseLabel}: manager-diagnostics.logSourcePath must be an object when provided`
+  );
+
+  const normalized = {
+    enabled: diagnostics.enabled,
+    logSourcePath: diagnostics.logSourcePath || {},
+    environment: diagnostics.environment || {}
+  };
+  validateStringOrStringArrayMap(normalized.logSourcePath, `${releaseLabel}: manager-diagnostics.logSourcePath`);
+  validateStringMap(normalized.environment, `${releaseLabel}: manager-diagnostics.environment`);
+
+  return normalized;
 }
 
 function sortReleases(releases) {
@@ -269,6 +348,7 @@ async function buildReleaseFromGitHubRelease(config, release, options = {}) {
     releaseDate: release.published_at || release.created_at,
     releaseNotesUrl: release.html_url,
     releaseHighlights: extractReleaseHighlights(release.body || ""),
+    diagnostics: extractDiagnostics(release.body || "", `${config.pluginId} ${release.tag_name}`),
     platforms: matchedPackages
   };
 }
@@ -352,6 +432,7 @@ async function generateForConfig(configPath, releasesPath, managerRoot) {
       releaseDate: currentStableRelease.releaseDate,
       releaseNotesUrl: currentStableRelease.releaseNotesUrl,
       releaseHighlights: currentStableRelease.releaseHighlights,
+      diagnostics: currentStableRelease.diagnostics,
       platforms: currentStableRelease.platforms,
       availableVersions
     };
@@ -370,6 +451,7 @@ async function generateForConfig(configPath, releasesPath, managerRoot) {
       releaseDate: currentBetaRelease.releaseDate,
       releaseNotesUrl: currentBetaRelease.releaseNotesUrl,
       releaseHighlights: currentBetaRelease.releaseHighlights,
+      diagnostics: currentBetaRelease.diagnostics,
       platforms: currentBetaRelease.platforms,
       availableVersions: []
     };
@@ -415,4 +497,13 @@ async function main() {
   }
 }
 
-await main();
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main();
+}
+
+export {
+  buildReleaseFromGitHubRelease,
+  extractDiagnostics,
+  extractReleaseHighlights,
+  parseBooleanMarker
+};

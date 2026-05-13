@@ -17,6 +17,7 @@
       "pluginId": "lensdiff",
       "displayName": "LensDiff",
       "manifestUrl": "${MEPM_MANAGER_ROOT}\\docs\\plugins\\dev\\lensdiff.local.json",
+      "betaManifestUrl": "${MEPM_MANAGER_ROOT}\\docs\\plugins\\dev\\lensdiff.local.json",
       "iconUrl": "${MEPM_MANAGER_ROOT}\\docs\\plugin-icons\\lensdiff.png"
     }
   ]

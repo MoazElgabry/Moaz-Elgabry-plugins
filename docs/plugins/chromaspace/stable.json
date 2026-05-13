@@ -6,6 +6,22 @@
   "releaseDate": "2026-05-07T22:11:53Z",
   "releaseNotesUrl": "https://github.com/MoazElgabry/Chromaspace/releases/tag/1.0.11",
   "releaseHighlights": "- Added an option in settings to reset the camera view when switching models.\n- Resuming the connection after minimizing the viewer is fixed.\n- Improved the response of the Neutral radius slider.",
+  "diagnostics": {
+    "enabled": true,
+    "logSourcePath": {
+      "windows": [
+        "%LOCALAPPDATA%\\Chromaspace.log",
+        "%LOCALAPPDATA%\\Chromaspace_CubeViewer.log"
+      ],
+      "macos": "~/Library/Logs/Chromaspace.log",
+      "linux": "~/.cache/Chromaspace.log"
+    },
+    "environment": {
+      "CHROMASPACE_DEBUG_LOG": "1",
+      "CHROMASPACE_MULTI_INSTANCE_DEBUG": "1",
+      "CHROMASPACE_DIAGNOSTICS": "1"
+    }
+  },
   "platforms": [
     {
       "platform": "windows",

@@ -5,6 +5,22 @@
   "version": "dev-local",
   "releaseDate": "2026-03-17T00:00:00Z",
   "releaseNotesUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/release-notes/chromaspace-0.0.0-dev.html",
+  "diagnostics": {
+    "enabled": true,
+    "logSourcePath": {
+      "windows": [
+        "%LOCALAPPDATA%\\Chromaspace.log",
+        "%LOCALAPPDATA%\\Chromaspace_CubeViewer.log"
+      ],
+      "macos": "~/Library/Logs/Chromaspace.log",
+      "linux": "~/.cache/Chromaspace.log"
+    },
+    "environment": {
+      "CHROMASPACE_DEBUG_LOG": "1",
+      "CHROMASPACE_MULTI_INSTANCE_DEBUG": "1",
+      "CHROMASPACE_DIAGNOSTICS": "1"
+    }
+  },
   "platforms": [
     {
       "platform": "windows",

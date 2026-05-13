@@ -1,6 +1,7 @@
 use crate::catalog;
 use crate::models::{
-    BundleInstallStamp, InstallRecord, ManagedInstallState, PlatformPackage, PluginOperationResult,
+    BundleInstallStamp, InstallRecord, ManagedInstallState, PlatformPackage, PluginDiagnostics,
+    PluginOperationResult,
 };
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::Utc;
@@ -8,13 +9,15 @@ use flate2::read::GzDecoder;
 use fs_extra::dir::{copy as copy_dir, CopyOptions};
 use plist::Value as PlistValue;
 use reqwest::Client;
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use sysinfo::System;
 use tar::Archive;
+use tauri::{AppHandle, Emitter};
 use tempfile::tempdir;
 use walkdir::WalkDir;
 use zip::ZipArchive;
@@ -24,6 +27,12 @@ use std::os::windows::process::CommandExt;
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+const LOG_EXPORT_STEPS: [&str; 3] = [
+    "Launching Resolve for diagnostics",
+    "Reproduce the issue, then close Resolve",
+    "Collecting logs after Resolve closes",
+];
 
 pub fn updater_configured() -> bool {
     true
@@ -292,6 +301,650 @@ async fn uninstall_plugin(plugin_id: &str, action: &str) -> Result<PluginOperati
     })
 }
 
+pub async fn export_plugin_logs(
+    app: &AppHandle,
+    plugin_id: &str,
+    destination_dir: &str,
+    remove_previous_logs: bool,
+) -> Result<PluginOperationResult> {
+    let resolved = catalog::resolve_plugin(plugin_id, None).await?;
+    let diagnostics = resolved
+        .manifest
+        .diagnostics
+        .as_ref()
+        .filter(|diagnostics| diagnostics.enabled)
+        .ok_or_else(|| anyhow!("Diagnostics are not enabled for this plugin release."))?;
+    let raw_log_sources = diagnostics
+        .log_source_path
+        .get(current_platform())
+        .ok_or_else(|| {
+            anyhow!(
+                "Diagnostics are not enabled for platform `{}`.",
+                current_platform()
+            )
+        })?;
+
+    ensure_resolve_closed(&resolved.package.host_processes)?;
+
+    let destination_root = PathBuf::from(destination_dir);
+    fs::create_dir_all(&destination_root)
+        .with_context(|| format!("Failed to create {}", destination_root.display()))?;
+    let log_sources = raw_log_sources
+        .as_slice()
+        .iter()
+        .map(|source| expand_diagnostics_path(source))
+        .collect::<Result<Vec<_>>>()?;
+    if log_sources.is_empty() {
+        bail!(
+            "Diagnostics are not enabled for platform `{}`.",
+            current_platform()
+        );
+    }
+    if remove_previous_logs {
+        clear_log_sources(&log_sources)?;
+    }
+    let mut command = resolve_command()?;
+    let env_entries = diagnostics_environment(diagnostics, &log_sources[0], &destination_root)?;
+    command.envs(env_entries.clone());
+    command.stdin(Stdio::null());
+    command.stdout(Stdio::null());
+    command.stderr(Stdio::null());
+
+    emit_log_export_progress(app, plugin_id, LOG_EXPORT_STEPS[0], 0);
+    let mut child = command
+        .spawn()
+        .context("Failed to launch Resolve for the diagnostics session")?;
+    emit_log_export_progress(app, plugin_id, LOG_EXPORT_STEPS[1], 1);
+    child
+        .wait()
+        .context("Failed while waiting for Resolve to close")?;
+    emit_log_export_progress(app, plugin_id, LOG_EXPORT_STEPS[2], 2);
+
+    let export_root = destination_root.join(format!(
+        "{}-logs-{}",
+        sanitize_export_name(&resolved.manifest.display_name),
+        Utc::now().format("%Y%m%d-%H%M%S")
+    ));
+    let copy_outcome = copy_log_sources_to_export_or_notice(
+        &log_sources,
+        &export_root,
+        &resolved.manifest.display_name,
+        &env_entries,
+    )?;
+
+    Ok(PluginOperationResult {
+        plugin_id: plugin_id.to_string(),
+        action: "export-logs".to_string(),
+        status: "success".to_string(),
+        message: log_export_message(&copy_outcome, &export_root, &env_entries),
+    })
+}
+
+pub async fn check_plugin_log_export_ready(plugin_id: &str) -> Result<()> {
+    let resolved = catalog::resolve_plugin(plugin_id, None).await?;
+    let diagnostics = resolved
+        .manifest
+        .diagnostics
+        .as_ref()
+        .filter(|diagnostics| diagnostics.enabled)
+        .ok_or_else(|| anyhow!("Diagnostics are not enabled for this plugin release."))?;
+    let raw_log_sources = diagnostics
+        .log_source_path
+        .get(current_platform())
+        .ok_or_else(|| {
+            anyhow!(
+                "Diagnostics are not enabled for platform `{}`.",
+                current_platform()
+            )
+        })?;
+
+    if raw_log_sources.as_slice().is_empty() {
+        bail!(
+            "Diagnostics are not enabled for platform `{}`.",
+            current_platform()
+        );
+    }
+
+    ensure_resolve_closed(&resolved.package.host_processes)
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LogExportProgress {
+    plugin_id: String,
+    label: String,
+    steps: Vec<String>,
+    step_index: usize,
+}
+
+fn emit_log_export_progress(app: &AppHandle, plugin_id: &str, label: &str, step_index: usize) {
+    let _ = app.emit(
+        "plugin-log-export-progress",
+        LogExportProgress {
+            plugin_id: plugin_id.to_string(),
+            label: label.to_string(),
+            steps: LOG_EXPORT_STEPS
+                .iter()
+                .map(|step| step.to_string())
+                .collect(),
+            step_index,
+        },
+    );
+}
+
+fn ensure_resolve_closed(host_processes: &[String]) -> Result<()> {
+    let mut candidates = host_processes.to_vec();
+    candidates.extend([
+        "Resolve".to_string(),
+        "Resolve.exe".to_string(),
+        "DaVinci Resolve".to_string(),
+        "DaVinci Resolve.app".to_string(),
+    ]);
+    match ensure_hosts_closed(&candidates) {
+        Ok(()) => Ok(()),
+        Err(error) => bail!("Close Resolve before starting a diagnostics session. {error}"),
+    }
+}
+
+fn diagnostics_environment(
+    diagnostics: &PluginDiagnostics,
+    log_source: &Path,
+    destination_root: &Path,
+) -> Result<Vec<(String, String)>> {
+    let mut entries = Vec::new();
+    for (key, value) in &diagnostics.environment {
+        if !is_valid_environment_key(key) {
+            bail!("Diagnostics environment key `{key}` is not valid");
+        }
+        let expanded = value
+            .replace("{logSourcePath}", &log_source.display().to_string())
+            .replace("{destinationDir}", &destination_root.display().to_string());
+        entries.push((key.clone(), expanded));
+    }
+    Ok(entries)
+}
+
+fn is_valid_environment_key(value: &str) -> bool {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn resolve_command() -> Result<Command> {
+    if let Some(explicit) = std::env::var_os("RESOLVE_EXECUTABLE") {
+        let path = PathBuf::from(explicit);
+        if path.exists() {
+            return Ok(Command::new(path));
+        }
+    }
+
+    for candidate in default_resolve_candidates() {
+        if candidate.exists() {
+            return Ok(Command::new(candidate));
+        }
+    }
+
+    let fallback = if cfg!(target_os = "windows") {
+        "Resolve.exe"
+    } else {
+        "resolve"
+    };
+    Ok(Command::new(fallback))
+}
+
+fn default_resolve_candidates() -> Vec<PathBuf> {
+    if cfg!(target_os = "windows") {
+        return vec![PathBuf::from(
+            r"C:\Program Files\Blackmagic Design\DaVinci Resolve\Resolve.exe",
+        )];
+    }
+    if cfg!(target_os = "macos") {
+        return vec![PathBuf::from(
+            "/Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/MacOS/Resolve",
+        )];
+    }
+    if cfg!(target_os = "linux") {
+        return vec![
+            PathBuf::from("/opt/resolve/bin/resolve"),
+            PathBuf::from("/usr/bin/resolve"),
+            PathBuf::from("/usr/local/bin/resolve"),
+        ];
+    }
+    Vec::new()
+}
+
+fn expand_diagnostics_path(raw: &str) -> Result<PathBuf> {
+    let expanded_home = expand_home(raw);
+    let expanded_percent = expand_percent_environment(&expanded_home)?;
+    let expanded_dollar = expand_dollar_environment(&expanded_percent)?;
+    Ok(PathBuf::from(normalize_runtime_path(&expanded_dollar)))
+}
+
+fn expand_home(raw: &str) -> String {
+    if raw == "~" {
+        return dirs::home_dir()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| raw.to_string());
+    }
+    if let Some(rest) = raw.strip_prefix("~/").or_else(|| raw.strip_prefix("~\\")) {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest).display().to_string();
+        }
+    }
+    raw.to_string()
+}
+
+fn expand_percent_environment(raw: &str) -> Result<String> {
+    let mut output = String::new();
+    let mut rest = raw;
+    while let Some(start) = rest.find('%') {
+        output.push_str(&rest[..start]);
+        let after_start = &rest[start + 1..];
+        let Some(end) = after_start.find('%') else {
+            output.push('%');
+            output.push_str(after_start);
+            return Ok(output);
+        };
+        let name = &after_start[..end];
+        if name.is_empty() {
+            output.push_str("%%");
+        } else {
+            output.push_str(
+                &std::env::var(name)
+                    .with_context(|| format!("Environment variable `{name}` is not set"))?,
+            );
+        }
+        rest = &after_start[end + 1..];
+    }
+    output.push_str(rest);
+    Ok(output)
+}
+
+fn expand_dollar_environment(raw: &str) -> Result<String> {
+    let chars: Vec<char> = raw.chars().collect();
+    let mut output = String::new();
+    let mut index = 0;
+    while index < chars.len() {
+        if chars[index] != '$' {
+            output.push(chars[index]);
+            index += 1;
+            continue;
+        }
+
+        if chars.get(index + 1) == Some(&'{') {
+            let mut end = index + 2;
+            while end < chars.len() && chars[end] != '}' {
+                end += 1;
+            }
+            if end >= chars.len() {
+                output.push(chars[index]);
+                index += 1;
+                continue;
+            }
+            let name = chars[index + 2..end].iter().collect::<String>();
+            output.push_str(
+                &std::env::var(&name)
+                    .with_context(|| format!("Environment variable `{name}` is not set"))?,
+            );
+            index = end + 1;
+            continue;
+        }
+
+        let mut end = index + 1;
+        while end < chars.len() && (chars[end] == '_' || chars[end].is_ascii_alphanumeric()) {
+            end += 1;
+        }
+        if end == index + 1 {
+            output.push('$');
+            index += 1;
+            continue;
+        }
+        let name = chars[index + 1..end].iter().collect::<String>();
+        output.push_str(
+            &std::env::var(&name)
+                .with_context(|| format!("Environment variable `{name}` is not set"))?,
+        );
+        index = end;
+    }
+    Ok(output)
+}
+
+struct LogCopyOutcome {
+    copied_files: usize,
+    notice_written: bool,
+}
+
+fn copy_logs_to_export_or_notice(
+    source: &Path,
+    destination: &Path,
+    plugin_name: &str,
+    env_entries: &[(String, String)],
+) -> Result<LogCopyOutcome> {
+    fs::create_dir_all(destination)
+        .with_context(|| format!("Failed to create {}", destination.display()))?;
+
+    if !source.exists() {
+        write_missing_log_notice(source, destination, plugin_name, env_entries)?;
+        return Ok(LogCopyOutcome {
+            copied_files: 0,
+            notice_written: true,
+        });
+    }
+
+    if source.is_file() {
+        let filename = source
+            .file_name()
+            .ok_or_else(|| anyhow!("Log source file has no filename"))?;
+        fs::copy(source, destination.join(filename))
+            .with_context(|| format!("Failed to copy {}", source.display()))?;
+        return Ok(LogCopyOutcome {
+            copied_files: 1,
+            notice_written: false,
+        });
+    }
+
+    let mut copied = 0;
+    for entry in WalkDir::new(source)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let relative = entry.path().strip_prefix(source).with_context(|| {
+            format!(
+                "Failed to resolve relative path for {}",
+                entry.path().display()
+            )
+        })?;
+        let target = destination.join(relative);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create {}", parent.display()))?;
+        }
+        fs::copy(entry.path(), &target)
+            .with_context(|| format!("Failed to copy {}", entry.path().display()))?;
+        copied += 1;
+    }
+
+    if copied == 0 {
+        write_missing_log_notice(source, destination, plugin_name, env_entries)?;
+        return Ok(LogCopyOutcome {
+            copied_files: 0,
+            notice_written: true,
+        });
+    }
+
+    Ok(LogCopyOutcome {
+        copied_files: copied,
+        notice_written: false,
+    })
+}
+
+fn copy_log_sources_to_export_or_notice(
+    sources: &[PathBuf],
+    destination: &Path,
+    plugin_name: &str,
+    env_entries: &[(String, String)],
+) -> Result<LogCopyOutcome> {
+    fs::create_dir_all(destination)
+        .with_context(|| format!("Failed to create {}", destination.display()))?;
+
+    let mut copied_files = 0;
+    let mut missing_sources = Vec::new();
+    for source in sources {
+        if !source.exists() {
+            missing_sources.push(source.clone());
+            continue;
+        }
+        copied_files +=
+            copy_logs_to_export_or_notice(source, destination, plugin_name, env_entries)?
+                .copied_files;
+    }
+
+    if copied_files == 0 {
+        write_missing_log_sources_notice(sources, destination, plugin_name, env_entries)?;
+        return Ok(LogCopyOutcome {
+            copied_files: 0,
+            notice_written: true,
+        });
+    }
+
+    if !missing_sources.is_empty() {
+        write_partial_log_sources_notice(&missing_sources, destination, plugin_name, env_entries)?;
+    }
+
+    Ok(LogCopyOutcome {
+        copied_files,
+        notice_written: false,
+    })
+}
+
+fn clear_log_sources(sources: &[PathBuf]) -> Result<()> {
+    for source in sources {
+        if !source.exists() {
+            continue;
+        }
+        ensure_safe_log_clear_path(source)?;
+        let metadata = fs::symlink_metadata(source)
+            .with_context(|| format!("Failed to inspect {}", source.display()))?;
+        if metadata.is_file() || metadata.file_type().is_symlink() {
+            fs::remove_file(source)
+                .with_context(|| format!("Failed to remove previous log {}", source.display()))?;
+            continue;
+        }
+        if metadata.is_dir() {
+            for entry in fs::read_dir(source)
+                .with_context(|| format!("Failed to read {}", source.display()))?
+            {
+                let path = entry?.path();
+                let entry_metadata = fs::symlink_metadata(&path)
+                    .with_context(|| format!("Failed to inspect {}", path.display()))?;
+                if entry_metadata.is_dir() && !entry_metadata.file_type().is_symlink() {
+                    fs::remove_dir_all(&path).with_context(|| {
+                        format!("Failed to remove previous log folder {}", path.display())
+                    })?;
+                } else {
+                    fs::remove_file(&path).with_context(|| {
+                        format!("Failed to remove previous log file {}", path.display())
+                    })?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn ensure_safe_log_clear_path(source: &Path) -> Result<()> {
+    let canonical_source = fs::canonicalize(source)
+        .with_context(|| format!("Failed to resolve {}", source.display()))?;
+    if canonical_source.parent().is_none() || canonical_source.file_name().is_none() {
+        bail!(
+            "Refusing to remove previous logs from broad path {}",
+            source.display()
+        );
+    }
+
+    for forbidden in dangerous_log_clear_roots() {
+        if forbidden.exists() {
+            let canonical_forbidden = fs::canonicalize(&forbidden)
+                .with_context(|| format!("Failed to resolve {}", forbidden.display()))?;
+            if canonical_source == canonical_forbidden {
+                bail!(
+                    "Refusing to remove previous logs from broad path {}",
+                    source.display()
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn dangerous_log_clear_roots() -> Vec<PathBuf> {
+    [
+        dirs::home_dir(),
+        dirs::data_dir(),
+        dirs::data_local_dir(),
+        dirs::cache_dir(),
+        Some(std::env::temp_dir()),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+fn write_missing_log_notice(
+    source: &Path,
+    destination: &Path,
+    plugin_name: &str,
+    env_entries: &[(String, String)],
+) -> Result<()> {
+    write_log_notice(
+        &[source.to_path_buf()],
+        destination,
+        plugin_name,
+        env_entries,
+        "Resolve was launched for a diagnostics session, but no plugin log file or log files were found at the expected source path after Resolve closed.",
+        "diagnostics-export-note.txt",
+    )
+}
+
+fn write_missing_log_sources_notice(
+    sources: &[PathBuf],
+    destination: &Path,
+    plugin_name: &str,
+    env_entries: &[(String, String)],
+) -> Result<()> {
+    write_log_notice(
+        sources,
+        destination,
+        plugin_name,
+        env_entries,
+        "Resolve was launched for a diagnostics session, but no plugin log file or log files were found at the expected source paths after Resolve closed.",
+        "diagnostics-export-note.txt",
+    )
+}
+
+fn write_partial_log_sources_notice(
+    sources: &[PathBuf],
+    destination: &Path,
+    plugin_name: &str,
+    env_entries: &[(String, String)],
+) -> Result<()> {
+    write_log_notice(
+        sources,
+        destination,
+        plugin_name,
+        env_entries,
+        "Some configured diagnostics log sources were not found after Resolve closed.",
+        "diagnostics-export-missing-sources.txt",
+    )
+}
+
+fn write_log_notice(
+    sources: &[PathBuf],
+    destination: &Path,
+    plugin_name: &str,
+    env_entries: &[(String, String)],
+    message: &str,
+    filename: &str,
+) -> Result<()> {
+    let env_summary = if env_entries.is_empty() {
+        "No diagnostics environment variables were configured.\n".to_string()
+    } else {
+        env_entries
+            .iter()
+            .map(|(key, value)| format!("{key}={value}\n"))
+            .collect::<String>()
+    };
+    let source_summary = sources
+        .iter()
+        .map(|source| format!("- {}\n", source.display()))
+        .collect::<String>();
+    let notice = format!(
+        "Diagnostics log export note\n\
+         Plugin: {plugin_name}\n\
+         Export time: {}\n\
+         Expected log sources:\n{}\n\
+         {}\n\n\
+         Diagnostics environment used:\n{}",
+        Utc::now().to_rfc3339(),
+        source_summary,
+        message,
+        env_summary
+    );
+    fs::write(destination.join(filename), notice).with_context(|| {
+        format!(
+            "Failed to write diagnostics note in {}",
+            destination.display()
+        )
+    })
+}
+
+fn diagnostics_environment_activity_summary(env_entries: &[(String, String)]) -> String {
+    if env_entries.is_empty() {
+        return "Diagnostics environment used: none.".to_string();
+    }
+
+    format!(
+        "Diagnostics environment used: {}.",
+        env_entries
+            .iter()
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect::<Vec<_>>()
+            .join("; ")
+    )
+}
+
+fn log_export_message(
+    outcome: &LogCopyOutcome,
+    export_root: &Path,
+    env_entries: &[(String, String)],
+) -> String {
+    let base = if outcome.notice_written && outcome.copied_files == 0 {
+        format!(
+            "No plugin log file was produced. Wrote a diagnostics note to {}.",
+            export_root.display()
+        )
+    } else {
+        format!(
+            "Exported {} log file{} to {}.",
+            outcome.copied_files,
+            if outcome.copied_files == 1 { "" } else { "s" },
+            export_root.display()
+        )
+    };
+
+    format!(
+        "{} {}",
+        base,
+        diagnostics_environment_activity_summary(env_entries)
+    )
+}
+
+fn sanitize_export_name(raw: &str) -> String {
+    let sanitized = raw
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string();
+    if sanitized.is_empty() {
+        "plugin".to_string()
+    } else {
+        sanitized
+    }
+}
+
 struct PackageSourceSpec {
     source: String,
     simulate_fail_after_backup: bool,
@@ -400,17 +1053,7 @@ fn ensure_hosts_closed(host_processes: &[String]) -> Result<()> {
 
     for process in system.processes().values() {
         let process_name = process.name().to_string_lossy().to_string();
-        let normalized_name = normalize_process_name(&process_name);
-        let normalized_exe = process
-            .exe()
-            .and_then(|path| path.file_name())
-            .map(|name| normalize_process_name(&name.to_string_lossy()))
-            .unwrap_or_default();
-
-        if candidates
-            .iter()
-            .any(|candidate| *candidate == normalized_name || *candidate == normalized_exe)
-        {
+        if process_matches_candidates(&process_name, process.exe(), &candidates) {
             running.push(process_name);
         }
     }
@@ -425,6 +1068,22 @@ fn ensure_hosts_closed(host_processes: &[String]) -> Result<()> {
         "Close the running host applications before installing: {}",
         running.join(", ")
     )
+}
+
+fn process_matches_candidates(
+    process_name: &str,
+    process_exe: Option<&Path>,
+    candidates: &[String],
+) -> bool {
+    let normalized_name = normalize_process_name(process_name);
+    let normalized_exe = process_exe
+        .and_then(|path| path.file_name())
+        .map(|name| normalize_process_name(&name.to_string_lossy()))
+        .unwrap_or_default();
+
+    candidates
+        .iter()
+        .any(|candidate| *candidate == normalized_name || *candidate == normalized_exe)
 }
 
 fn normalize_process_name(value: &str) -> String {
@@ -1320,5 +1979,169 @@ fn normalize_runtime_path(raw: &str) -> PathBuf {
         PathBuf::from(raw.replace('/', "\\"))
     } else {
         PathBuf::from(raw)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diagnostics_environment_replaces_supported_tokens() {
+        let diagnostics = PluginDiagnostics {
+            enabled: true,
+            log_source_path: Default::default(),
+            environment: [
+                (
+                    "LENSDIFF_LOG_DIR".to_string(),
+                    "{logSourcePath}".to_string(),
+                ),
+                (
+                    "LENSDIFF_EXPORT_DIR".to_string(),
+                    "{destinationDir}".to_string(),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        let log_source = PathBuf::from("C:\\Logs");
+        let destination = PathBuf::from("D:\\Exports");
+        let entries = diagnostics_environment(&diagnostics, &log_source, &destination).unwrap();
+
+        assert!(entries.contains(&(
+            "LENSDIFF_LOG_DIR".to_string(),
+            log_source.display().to_string()
+        )));
+        assert!(entries.contains(&(
+            "LENSDIFF_EXPORT_DIR".to_string(),
+            destination.display().to_string()
+        )));
+    }
+
+    #[test]
+    fn diagnostics_environment_rejects_invalid_keys() {
+        let diagnostics = PluginDiagnostics {
+            enabled: true,
+            log_source_path: Default::default(),
+            environment: [("1BAD".to_string(), "value".to_string())]
+                .into_iter()
+                .collect(),
+        };
+
+        assert!(diagnostics_environment(
+            &diagnostics,
+            &PathBuf::from("logs"),
+            &PathBuf::from("exports")
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn expand_diagnostics_path_handles_home_prefix() {
+        let expanded = expand_diagnostics_path("~/MoazElgabry/LensDiff/logs").unwrap();
+        assert!(expanded.ends_with(Path::new("MoazElgabry").join("LensDiff").join("logs")));
+    }
+
+    #[test]
+    fn process_matching_does_not_treat_proxy_resolver_as_resolve() {
+        let candidates = ["Resolve", "Resolve.exe", "DaVinci Resolve"]
+            .into_iter()
+            .map(normalize_process_name)
+            .collect::<Vec<_>>();
+
+        assert!(!process_matches_candidates(
+            "Proxy Resolver",
+            Some(Path::new("/usr/lib/proxy-resolver")),
+            &candidates
+        ));
+        assert!(process_matches_candidates(
+            "resolve",
+            Some(Path::new("/opt/resolve/bin/resolve")),
+            &candidates
+        ));
+        assert!(process_matches_candidates(
+            "DaVinci Resolve",
+            Some(Path::new(
+                "/Applications/DaVinci Resolve/DaVinci Resolve.app"
+            )),
+            &candidates
+        ));
+    }
+
+    #[test]
+    fn copy_log_sources_copies_multiple_files_and_directories() {
+        let temp = tempdir().unwrap();
+        let source_root = temp.path().join("sources");
+        let source_dir = source_root.join("folder");
+        fs::create_dir_all(&source_dir).unwrap();
+        fs::write(source_dir.join("inside.log"), "folder log").unwrap();
+        let source_file = source_root.join("single.log");
+        fs::write(&source_file, "single log").unwrap();
+        let destination = temp.path().join("export");
+
+        let outcome = copy_log_sources_to_export_or_notice(
+            &[source_dir, source_file],
+            &destination,
+            "Test Plugin",
+            &[],
+        )
+        .unwrap();
+
+        assert_eq!(outcome.copied_files, 2);
+        assert!(!outcome.notice_written);
+        assert_eq!(
+            fs::read_to_string(destination.join("inside.log")).unwrap(),
+            "folder log"
+        );
+        assert_eq!(
+            fs::read_to_string(destination.join("single.log")).unwrap(),
+            "single log"
+        );
+    }
+
+    #[test]
+    fn copy_log_sources_writes_note_when_all_sources_are_missing() {
+        let temp = tempdir().unwrap();
+        let destination = temp.path().join("export");
+
+        let outcome = copy_log_sources_to_export_or_notice(
+            &[
+                temp.path().join("missing-one.log"),
+                temp.path().join("missing-two.log"),
+            ],
+            &destination,
+            "Test Plugin",
+            &[("PLUGIN_LOG".to_string(), "1".to_string())],
+        )
+        .unwrap();
+
+        assert_eq!(outcome.copied_files, 0);
+        assert!(outcome.notice_written);
+        let note = fs::read_to_string(destination.join("diagnostics-export-note.txt")).unwrap();
+        assert!(note.contains("missing-one.log"));
+        assert!(note.contains("missing-two.log"));
+        assert!(note.contains("PLUGIN_LOG=1"));
+    }
+
+    #[test]
+    fn clear_log_sources_removes_files_and_directory_contents() {
+        let temp = tempdir().unwrap();
+        let log_file = temp.path().join("single.log");
+        fs::write(&log_file, "old file log").unwrap();
+        let log_dir = temp.path().join("PluginLogs");
+        fs::create_dir_all(log_dir.join("nested")).unwrap();
+        fs::write(log_dir.join("old.log"), "old folder log").unwrap();
+        fs::write(log_dir.join("nested").join("old.log"), "old nested log").unwrap();
+
+        clear_log_sources(&[log_file.clone(), log_dir.clone()]).unwrap();
+
+        assert!(!log_file.exists());
+        assert!(log_dir.exists());
+        assert!(fs::read_dir(&log_dir).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn clear_log_sources_refuses_broad_temp_root() {
+        assert!(clear_log_sources(&[std::env::temp_dir()]).is_err());
     }
 }

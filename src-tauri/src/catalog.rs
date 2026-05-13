@@ -9,7 +9,7 @@ use reqwest::header::{CACHE_CONTROL, PRAGMA};
 use reqwest::Client;
 use serde::de::DeserializeOwned;
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -23,6 +23,7 @@ pub struct CatalogBundle {
     pub source_label: String,
     pub entries: Vec<CatalogEntry>,
     pub manifests: HashMap<String, PluginManifest>,
+    pub beta_plugins: HashSet<String>,
 }
 
 pub async fn build_dashboard_state() -> Result<DashboardState> {
@@ -49,6 +50,7 @@ pub async fn build_dashboard_state() -> Result<DashboardState> {
                 manifest,
                 package,
                 &install_state,
+                bundle.beta_plugins.contains(&entry.plugin_id),
             ))
         })
         .collect::<Vec<_>>();
@@ -86,6 +88,7 @@ fn build_plugin_status(
     manifest: &PluginManifest,
     package: PlatformPackage,
     install_state: &crate::models::ManagedInstallState,
+    beta_release: bool,
 ) -> PluginStatus {
     let target_bundle = PathBuf::from(&package.install_path).join(&package.bundle_name);
     let installed = target_bundle.exists();
@@ -145,6 +148,7 @@ fn build_plugin_status(
         display_name: manifest.display_name.clone(),
         icon_url: manifest.icon_url.clone().or(entry.icon_url.clone()),
         latest_version: manifest.version.clone(),
+        beta_release,
         installed_version,
         install_path: package.install_path.clone(),
         bundle_name: package.bundle_name.clone(),
@@ -157,8 +161,25 @@ fn build_plugin_status(
         status,
         release_notes_url: manifest.release_notes_url.clone(),
         release_highlights: manifest.release_highlights.clone(),
+        diagnostics: diagnostics_for_current_platform(manifest),
         available_versions,
     }
+}
+
+fn diagnostics_for_current_platform(
+    manifest: &PluginManifest,
+) -> Option<crate::models::PluginDiagnostics> {
+    let diagnostics = manifest.diagnostics.clone()?;
+    if !diagnostics.enabled {
+        return None;
+    }
+    if !diagnostics
+        .log_source_path
+        .contains_key(installer::current_platform())
+    {
+        return None;
+    }
+    Some(diagnostics)
 }
 
 fn version_cmp(left: &str, right: &str) -> Ordering {
@@ -454,6 +475,7 @@ fn collect_releases(manifest: &PluginManifest) -> Vec<PluginRelease> {
         release_date: manifest.release_date.clone(),
         release_notes_url: manifest.release_notes_url.clone(),
         release_highlights: manifest.release_highlights.clone(),
+        diagnostics: manifest.diagnostics.clone(),
         platforms: manifest.platforms.clone(),
     });
 
@@ -486,7 +508,7 @@ fn resolve_release(
 
 async fn load_catalog_bundle(prefer_beta: bool) -> Result<CatalogBundle> {
     if cfg!(debug_assertions) {
-        if let Some(bundle) = load_local_dev_catalog()? {
+        if let Some(bundle) = load_local_dev_catalog(prefer_beta)? {
             return Ok(bundle);
         }
     }
@@ -502,8 +524,14 @@ async fn load_catalog_bundle(prefer_beta: bool) -> Result<CatalogBundle> {
 
     let mut entries = Vec::new();
     let mut manifests = HashMap::new();
+    let mut beta_plugins = HashSet::new();
     for entry in &index.plugins {
-        if let Some(manifest) = load_manifest_for_entry(&client, entry, prefer_beta).await? {
+        if let Some((manifest, beta_release)) =
+            load_manifest_for_entry(&client, entry, prefer_beta).await?
+        {
+            if beta_release {
+                beta_plugins.insert(entry.plugin_id.clone());
+            }
             manifests.insert(entry.plugin_id.clone(), manifest);
             entries.push(entry.clone());
         }
@@ -514,6 +542,7 @@ async fn load_catalog_bundle(prefer_beta: bool) -> Result<CatalogBundle> {
         source_label: DEFAULT_CATALOG_URL.to_string(),
         entries,
         manifests,
+        beta_plugins,
     })
 }
 
@@ -521,7 +550,7 @@ async fn load_manifest_for_entry(
     client: &Client,
     entry: &CatalogEntry,
     prefer_beta: bool,
-) -> Result<Option<PluginManifest>> {
+) -> Result<Option<(PluginManifest, bool)>> {
     if let Some(stable_url) = entry_stable_manifest_url(entry) {
         let stable_manifest = fetch_json::<PluginManifest>(client, stable_url)
             .await
@@ -534,13 +563,16 @@ async fn load_manifest_for_entry(
                     if version_cmp(&beta_manifest.version, &stable_manifest.version)
                         == Ordering::Greater
                     {
-                        return Ok(Some(merge_beta_manifest(stable_manifest, beta_manifest)));
+                        return Ok(Some((
+                            merge_beta_manifest(stable_manifest, beta_manifest),
+                            true,
+                        )));
                     }
                 }
             }
         }
 
-        return Ok(Some(stable_manifest));
+        return Ok(Some((stable_manifest, false)));
     }
 
     if prefer_beta {
@@ -548,7 +580,7 @@ async fn load_manifest_for_entry(
         let beta_manifest = fetch_json::<PluginManifest>(client, &beta_url)
             .await
             .with_context(|| format!("Failed to load beta manifest for `{}`", entry.plugin_id))?;
-        return Ok(Some(beta_manifest));
+        return Ok(Some((beta_manifest, true)));
     }
 
     Ok(None)
@@ -567,6 +599,7 @@ fn merge_beta_manifest(
         release_date: stable_manifest.release_date.clone(),
         release_notes_url: stable_manifest.release_notes_url.clone(),
         release_highlights: stable_manifest.release_highlights.clone(),
+        diagnostics: stable_manifest.diagnostics.clone(),
         platforms: stable_manifest.platforms.clone(),
     });
 
@@ -588,7 +621,7 @@ fn merge_beta_manifest(
     beta_manifest
 }
 
-fn load_local_dev_catalog() -> Result<Option<CatalogBundle>> {
+fn load_local_dev_catalog(prefer_beta: bool) -> Result<Option<CatalogBundle>> {
     let manager_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .ok_or_else(|| anyhow!("Unable to resolve manager root"))?;
@@ -606,23 +639,80 @@ fn load_local_dev_catalog() -> Result<Option<CatalogBundle>> {
     let expanded_index = expand_tokens(&raw_index)?;
     let index: PluginCatalogIndex = serde_json::from_str(&expanded_index)
         .with_context(|| format!("Failed to parse {}", dev_index_path.display()))?;
+    let mut entries = Vec::new();
     let mut manifests = HashMap::new();
+    let mut beta_plugins = HashSet::new();
     for entry in &index.plugins {
-        let manifest_path = resolve_manifest_path(&entry.manifest_url, manager_root)?;
-        let raw_manifest = fs::read_to_string(&manifest_path)
-            .with_context(|| format!("Failed to read {}", manifest_path.display()))?;
-        let expanded = expand_tokens(&raw_manifest)?;
-        let manifest: PluginManifest = serde_json::from_str(&expanded)
-            .with_context(|| format!("Failed to parse {}", manifest_path.display()))?;
-        manifests.insert(entry.plugin_id.clone(), manifest);
+        if let Some((manifest, beta_release)) =
+            load_local_manifest_for_entry(entry, manager_root, prefer_beta)?
+        {
+            if beta_release {
+                beta_plugins.insert(entry.plugin_id.clone());
+            }
+            manifests.insert(entry.plugin_id.clone(), manifest);
+            entries.push(entry.clone());
+        }
     }
 
     Ok(Some(CatalogBundle {
         source: "local-dev".to_string(),
         source_label: dev_index_path.display().to_string(),
-        entries: index.plugins,
+        entries,
         manifests,
+        beta_plugins,
     }))
+}
+
+fn load_local_manifest_for_entry(
+    entry: &CatalogEntry,
+    manager_root: &Path,
+    prefer_beta: bool,
+) -> Result<Option<(PluginManifest, bool)>> {
+    let has_explicit_channels =
+        entry.stable_manifest_url.is_some() || entry.beta_manifest_url.is_some();
+
+    if has_explicit_channels {
+        if let Some(stable_url) = entry.stable_manifest_url.as_deref() {
+            let stable_manifest = read_local_manifest(stable_url, manager_root)?;
+            if prefer_beta {
+                if let Some(beta_url) = entry_beta_manifest_url(entry) {
+                    if let Ok(beta_manifest) = read_local_manifest(&beta_url, manager_root) {
+                        if version_cmp(&beta_manifest.version, &stable_manifest.version)
+                            == Ordering::Greater
+                        {
+                            return Ok(Some((
+                                merge_beta_manifest(stable_manifest, beta_manifest),
+                                true,
+                            )));
+                        }
+                    }
+                }
+            }
+            return Ok(Some((stable_manifest, false)));
+        }
+
+        if prefer_beta {
+            let beta_url = entry_beta_manifest_url(entry)
+                .ok_or_else(|| anyhow!("{} has no local beta manifest URL", entry.plugin_id))?;
+            return Ok(Some((read_local_manifest(&beta_url, manager_root)?, true)));
+        }
+
+        return Ok(None);
+    }
+
+    Ok(Some((
+        read_local_manifest(&entry.manifest_url, manager_root)?,
+        false,
+    )))
+}
+
+fn read_local_manifest(raw_url: &str, manager_root: &Path) -> Result<PluginManifest> {
+    let manifest_path = resolve_manifest_path(raw_url, manager_root)?;
+    let raw_manifest = fs::read_to_string(&manifest_path)
+        .with_context(|| format!("Failed to read {}", manifest_path.display()))?;
+    let expanded = expand_tokens(&raw_manifest)?;
+    serde_json::from_str(&expanded)
+        .with_context(|| format!("Failed to parse {}", manifest_path.display()))
 }
 
 async fn fetch_json<T>(client: &Client, url: &str) -> Result<T>
@@ -762,7 +852,8 @@ fn entry_stable_manifest_url(entry: &CatalogEntry) -> Option<&str> {
 
 fn entry_beta_manifest_url(entry: &CatalogEntry) -> Option<String> {
     entry.beta_manifest_url.clone().or_else(|| {
-        if entry.manifest_url.ends_with("/beta.json") || entry.manifest_url.ends_with("\\beta.json") {
+        if entry.manifest_url.ends_with("/beta.json") || entry.manifest_url.ends_with("\\beta.json")
+        {
             Some(entry.manifest_url.clone())
         } else {
             entry_stable_manifest_url(entry).and_then(beta_manifest_url)
@@ -795,6 +886,7 @@ mod tests {
             release_date: "2026-03-30T00:00:00Z".to_string(),
             release_notes_url: format!("https://example.com/releases/{version}"),
             release_highlights: None,
+            diagnostics: None,
             platforms: vec![test_package()],
         }
     }
@@ -808,6 +900,7 @@ mod tests {
             release_date: "2026-03-30T00:00:00Z".to_string(),
             release_notes_url: format!("https://example.com/releases/{version}"),
             release_highlights: None,
+            diagnostics: None,
             platforms: vec![test_package()],
             available_versions: available_versions
                 .iter()
@@ -886,6 +979,18 @@ mod tests {
         assert_eq!(
             entry_beta_manifest_url(&entry),
             Some(entry.manifest_url.clone())
+        );
+    }
+
+    #[test]
+    fn explicit_beta_only_entry_is_hidden_when_beta_is_disabled() {
+        let mut entry = test_catalog_entry("local-lensdiff.json");
+        entry.beta_manifest_url = Some("local-lensdiff.json".to_string());
+
+        assert_eq!(entry_stable_manifest_url(&entry), None);
+        assert_eq!(
+            entry_beta_manifest_url(&entry),
+            Some("local-lensdiff.json".to_string())
         );
     }
 

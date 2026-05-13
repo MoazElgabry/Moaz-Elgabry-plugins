@@ -3,5 +3,9 @@ dist/
 src-tauri/target/
 src-tauri/gen/
 .cargo-target/
+tauri.local-build.conf.json
+*.local.conf.json
+.env
+.env.*
 *.log
 local-*.png
