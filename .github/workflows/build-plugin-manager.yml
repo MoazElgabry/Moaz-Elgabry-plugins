@@ -132,6 +132,18 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Pin macOS Cargo executable
+        if: matrix.platform == 'macos-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo_path="$(rustup which cargo)"
+          cargo_dir="$(dirname "${cargo_path}")"
+          echo "${cargo_dir}" >> "${GITHUB_PATH}"
+          echo "CARGO=${cargo_path}" >> "${GITHUB_ENV}"
+          "${cargo_path}" --version
+          "${cargo_path}" metadata --manifest-path src-tauri/Cargo.toml --no-deps >/dev/null
+
       - name: Install macOS universal Rust targets
         if: matrix.platform == 'macos-latest'
         run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
