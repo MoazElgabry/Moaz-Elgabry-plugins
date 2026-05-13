@@ -89,6 +89,77 @@
   ],
   "availableVersions": [
     {
+      "version": "1.0.11",
+      "releaseDate": "2026-05-07T22:11:53Z",
+      "releaseNotesUrl": "https://github.com/MoazElgabry/Chromaspace/releases/tag/1.0.11",
+      "releaseHighlights": "- Added an option in settings to reset the camera view when switching models.\n- Resuming the connection after minimizing the viewer is fixed.\n- Improved the response of the Neutral radius slider.",
+      "platforms": [
+        {
+          "platform": "windows",
+          "arch": "x86_64",
+          "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/1.0.11/Chromaspace_v1.0.11_windows_x86_64_portable.zip",
+          "sha256": "e90582d14f0638ca059eea3f3a1c7e0866b2bd805a81920e71e75f3500888bb4",
+          "packageType": "zip",
+          "bundleName": "Chromaspace.ofx.bundle",
+          "bundleIdentifier": "com.moazelgabry.Chromaspace",
+          "installPath": "C:\\Program Files\\Common Files\\OFX\\Plugins",
+          "minManagerVersion": "0.1.0",
+          "hostProcesses": [
+            "Resolve",
+            "DaVinci Resolve",
+            "Fusion",
+            "Fusion Studio",
+            "Nuke",
+            "NukeX",
+            "NukeStudio",
+            "Hiero"
+          ]
+        },
+        {
+          "platform": "macos",
+          "arch": "universal",
+          "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/1.0.11/Chromaspace_v1.0.11_macOS_universal_portable.zip",
+          "sha256": "7df38fb80d9931463a327ef29f5d6ad4ca6882fcde5e6c077a10415389e22039",
+          "packageType": "zip",
+          "bundleName": "Chromaspace.ofx.bundle",
+          "bundleIdentifier": "com.moazelgabry.Chromaspace",
+          "installPath": "/Library/OFX/Plugins",
+          "minManagerVersion": "0.1.0",
+          "hostProcesses": [
+            "Resolve",
+            "DaVinci Resolve",
+            "Fusion",
+            "Fusion Studio",
+            "Nuke",
+            "NukeX",
+            "NukeStudio",
+            "Hiero"
+          ]
+        },
+        {
+          "platform": "linux",
+          "arch": "x86_64",
+          "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/1.0.11/Chromaspace_v1.0.11_linux_x86_64_cuda_opencl_cpu_portable.tar.gz",
+          "sha256": "8637127278230492c6a655428f22d1cc153f7344ddc44e254fab0a11a9cdf152",
+          "packageType": "tar.gz",
+          "bundleName": "Chromaspace.ofx.bundle",
+          "bundleIdentifier": "com.moazelgabry.Chromaspace",
+          "installPath": "/usr/OFX/Plugins",
+          "minManagerVersion": "0.1.0",
+          "hostProcesses": [
+            "Resolve",
+            "DaVinci Resolve",
+            "Fusion",
+            "Fusion Studio",
+            "Nuke",
+            "NukeX",
+            "NukeStudio",
+            "Hiero"
+          ]
+        }
+      ]
+    },
+    {
       "version": "1.0.2",
       "releaseDate": "2026-03-24T00:00:50Z",
       "releaseNotesUrl": "https://github.com/MoazElgabry/Chromaspace/releases/tag/chromaspace-draft-v1.0.2",
