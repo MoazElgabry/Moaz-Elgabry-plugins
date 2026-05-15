@@ -2,19 +2,42 @@
   "pluginId": "me-opendrt",
   "displayName": "ME_OpenDRT",
   "iconUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugin-icons/me-opendrt.png",
-  "version": "1.2.11",
-  "releaseDate": "2026-03-20T00:00:00Z",
-  "releaseNotesUrl": "https://github.com/MoazElgabry/ME_OpenDRT-OFX/releases/tag/v1.2.11",
+  "version": "1.2.12",
+  "releaseDate": "2026-05-15T21:34:28Z",
+  "releaseNotesUrl": "https://github.com/MoazElgabry/ME_OpenDRT-OFX/releases/tag/1.2.12",
+  "releaseHighlights": "- Fixed OpenCL implementation \n- Added options to edit defaults in the Preset Manager",
+  "diagnostics": {
+    "enabled": true,
+    "logSourcePath": {
+      "windows": [
+        "%LOCALAPPDATA%\\ME_OpenDRT",
+        "%TEMP%\\ME_OpenDRT_CubeViewer.log"
+      ],
+      "macos": [
+        "~/Library/Logs/ME_OpenDRT.log",
+        "~/Library/Logs/ME_OpenDRT_CubeViewer.log"
+      ],
+      "linux": [
+        "~/.cache/ME_OpenDRT",
+        "~/.cache/ME_OpenDRT_CubeViewer.log"
+      ]
+    },
+    "environment": {
+      "ME_OPENDRT_DEBUG_LOG": "1",
+      "ME_OPENDRT_PERF_LOG": "1",
+      "ME_OPENDRT_VIEWER_DIAGNOSTICS": "1"
+    }
+  },
   "platforms": [
     {
-      "platform": "linux",
+      "platform": "windows",
       "arch": "x86_64",
-      "downloadUrl": "https://github.com/MoazElgabry/ME_OpenDRT-OFX/releases/download/v1.2.11/ME_OpenDRT_v1.2.11_linux_x86_64_cuda_opencl_portable.tar.gz",
-      "sha256": "88a8452a404b53a49360dfc275afe2f92a19f467fe75a7eecac86a553bacdaec",
-      "packageType": "tar.gz",
+      "downloadUrl": "https://github.com/MoazElgabry/ME_OpenDRT-OFX/releases/download/1.2.12/ME_OpenDRT_v1.2.12_windows_x86_64_portable.zip",
+      "sha256": "c234bad389762d18434840615a8bbf3ea4f1ea467809e95e3710eb790a253abc",
+      "packageType": "zip",
       "bundleName": "ME_OpenDRT.ofx.bundle",
       "bundleIdentifier": "com.moazelgabry.me-opendrt",
-      "installPath": "/usr/OFX/Plugins",
+      "installPath": "C:\\Program Files\\Common Files\\OFX\\Plugins",
       "minManagerVersion": "0.1.0",
       "hostProcesses": [
         "Resolve",
@@ -30,8 +53,8 @@
     {
       "platform": "macos",
       "arch": "universal",
-      "downloadUrl": "https://github.com/MoazElgabry/ME_OpenDRT-OFX/releases/download/v1.2.11/ME_OpenDRT_v1.2.11_macOS_universal_portable.zip",
-      "sha256": "b9de9d46b19acb17ef3301e1f8ccfa685dfba14f16da7915f264b99fa631609a",
+      "downloadUrl": "https://github.com/MoazElgabry/ME_OpenDRT-OFX/releases/download/1.2.12/ME_OpenDRT_v1.2.12_macOS_universal_portable.zip",
+      "sha256": "0f7b7c38a94e0060cb08b58ca609d81bdaf60bcf795efc7254158f8e2ac80d5c",
       "packageType": "zip",
       "bundleName": "ME_OpenDRT.ofx.bundle",
       "bundleIdentifier": "com.meplugins.ME_OpenDRT",
@@ -49,14 +72,14 @@
       ]
     },
     {
-      "platform": "windows",
+      "platform": "linux",
       "arch": "x86_64",
-      "downloadUrl": "https://github.com/MoazElgabry/ME_OpenDRT-OFX/releases/download/v1.2.11/ME_OpenDRT_v1.2.11_Windows_cuda_opencl_Portable.zip",
-      "sha256": "d3c72d3f126f0b7073a7521a870eddaeb7660bb59ae0f70ff990d096f0e0bb03",
-      "packageType": "zip",
+      "downloadUrl": "https://github.com/MoazElgabry/ME_OpenDRT-OFX/releases/download/1.2.12/ME_OpenDRT_v1.2.12_linux_x86_64_cuda_opencl_cpu_portable.tar.gz",
+      "sha256": "ac6d85bce12c6d7fc4c75ae69bee0e9b518dc2ae48eb2e413d826edc78b3a6e6",
+      "packageType": "tar.gz",
       "bundleName": "ME_OpenDRT.ofx.bundle",
       "bundleIdentifier": "com.moazelgabry.me-opendrt",
-      "installPath": "C:\\Program Files\\Common Files\\OFX\\Plugins",
+      "installPath": "/usr/OFX/Plugins",
       "minManagerVersion": "0.1.0",
       "hostProcesses": [
         "Resolve",
@@ -70,76 +93,5 @@
       ]
     }
   ],
-  "availableVersions": [
-    {
-      "version": "1.1.0-rc1",
-      "releaseDate": "2026-02-24T00:00:00Z",
-      "releaseNotesUrl": "https://github.com/MoazElgabry/ME_OpenDRT-OFX/releases/tag/me-opendrt-ofx-v1.1-rc1",
-      "platforms": [
-        {
-          "platform": "macos",
-          "arch": "aarch64",
-          "downloadUrl": "https://github.com/MoazElgabry/ME_OpenDRT-OFX/releases/download/me-opendrt-ofx-v1.1-rc1/ME_OpenDRT_v1.1.0-rc1_macOS_arm64_portable.zip",
-          "sha256": "25bd795d6434930c5af186a1a095d06fcc1ffbbf97876040e634db10abc4820b",
-          "packageType": "zip",
-          "bundleName": "ME_OpenDRT.ofx.bundle",
-          "bundleIdentifier": "com.meplugins.ME_OpenDRT",
-          "installPath": "/Library/OFX/Plugins",
-          "minManagerVersion": "0.1.0",
-          "hostProcesses": [
-            "Resolve",
-            "DaVinci Resolve",
-            "Fusion",
-            "Fusion Studio",
-            "Nuke",
-            "NukeX",
-            "NukeStudio",
-            "Hiero"
-          ]
-        },
-        {
-          "platform": "macos",
-          "arch": "x86_64",
-          "downloadUrl": "https://github.com/MoazElgabry/ME_OpenDRT-OFX/releases/download/me-opendrt-ofx-v1.1-rc1/ME_OpenDRT_v1.1.0-rc1_macOS_x86_64_portable.zip",
-          "sha256": "65269ab2fcce4f4c5570c43c6d785a750d6eaaf8da1268228ddb0024ed811a05",
-          "packageType": "zip",
-          "bundleName": "ME_OpenDRT.ofx.bundle",
-          "bundleIdentifier": "com.meplugins.ME_OpenDRT",
-          "installPath": "/Library/OFX/Plugins",
-          "minManagerVersion": "0.1.0",
-          "hostProcesses": [
-            "Resolve",
-            "DaVinci Resolve",
-            "Fusion",
-            "Fusion Studio",
-            "Nuke",
-            "NukeX",
-            "NukeStudio",
-            "Hiero"
-          ]
-        },
-        {
-          "platform": "windows",
-          "arch": "x86_64",
-          "downloadUrl": "https://github.com/MoazElgabry/ME_OpenDRT-OFX/releases/download/me-opendrt-ofx-v1.1-rc1/ME_OpenDRT_v1.1.0-rc1_Windows_cuda_opencl__portable.zip",
-          "sha256": "634f83e9f923b238721ae49ddc1e89266d15e18632e10a5870953067e6259efa",
-          "packageType": "zip",
-          "bundleName": "ME_OpenDRT.ofx.bundle",
-          "bundleIdentifier": "com.moazelgabry.me-opendrt",
-          "installPath": "C:\\Program Files\\Common Files\\OFX\\Plugins",
-          "minManagerVersion": "0.1.0",
-          "hostProcesses": [
-            "Resolve",
-            "DaVinci Resolve",
-            "Fusion",
-            "Fusion Studio",
-            "Nuke",
-            "NukeX",
-            "NukeStudio",
-            "Hiero"
-          ]
-        }
-      ]
-    }
-  ]
+  "availableVersions": []
 }
