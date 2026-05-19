@@ -2,12 +2,12 @@
   "pluginId": "me-opendrt",
   "displayName": "ME_OpenDRT",
   "iconUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugin-icons/me-opendrt.png",
-  "version": "1.2.12",
-  "releaseDate": "2026-05-15T21:34:28Z",
-  "releaseNotesUrl": "https://github.com/MoazElgabry/ME_OpenDRT-OFX/releases/tag/1.2.12",
-  "releaseHighlights": "- Fixed OpenCL implementation \n- Added options to edit defaults in the Preset Manager",
+  "version": "1.2.13",
+  "releaseDate": "2026-05-19T15:59:35Z",
+  "releaseNotesUrl": "https://github.com/MoazElgabry/ME_OpenDRT-OFX/releases/tag/v1.2.13",
+  "releaseHighlights": "- Added Export LUT options.\n\n\n V1.2.12\n- Fixed OpenCL implementation\n- Added options to edit defaults in the Preset Manager",
   "diagnostics": {
-    "enabled": true,
+    "enabled": false,
     "logSourcePath": {
       "windows": [
         "%LOCALAPPDATA%\\ME_OpenDRT",
@@ -32,8 +32,8 @@
     {
       "platform": "windows",
       "arch": "x86_64",
-      "downloadUrl": "https://github.com/MoazElgabry/ME_OpenDRT-OFX/releases/download/1.2.12/ME_OpenDRT_v1.2.12_windows_x86_64_portable.zip",
-      "sha256": "c234bad389762d18434840615a8bbf3ea4f1ea467809e95e3710eb790a253abc",
+      "downloadUrl": "https://github.com/MoazElgabry/ME_OpenDRT-OFX/releases/download/v1.2.13/ME_OpenDRT_v1.2.13_windows_x86_64_portable.zip",
+      "sha256": "7d37997c8135930c1a99a2dd7b5c0d3cdc2d768b35406f57529e10c956c40e97",
       "packageType": "zip",
       "bundleName": "ME_OpenDRT.ofx.bundle",
       "bundleIdentifier": "com.moazelgabry.me-opendrt",
@@ -53,8 +53,8 @@
     {
       "platform": "macos",
       "arch": "universal",
-      "downloadUrl": "https://github.com/MoazElgabry/ME_OpenDRT-OFX/releases/download/1.2.12/ME_OpenDRT_v1.2.12_macOS_universal_portable.zip",
-      "sha256": "0f7b7c38a94e0060cb08b58ca609d81bdaf60bcf795efc7254158f8e2ac80d5c",
+      "downloadUrl": "https://github.com/MoazElgabry/ME_OpenDRT-OFX/releases/download/v1.2.13/ME_OpenDRT_v1.2.13_macOS_universal_portable.zip",
+      "sha256": "6e28fda50c823c97502c027d817d237ecd507141975f3b3144cc8b36d1d45ee9",
       "packageType": "zip",
       "bundleName": "ME_OpenDRT.ofx.bundle",
       "bundleIdentifier": "com.meplugins.ME_OpenDRT",
@@ -74,8 +74,8 @@
     {
       "platform": "linux",
       "arch": "x86_64",
-      "downloadUrl": "https://github.com/MoazElgabry/ME_OpenDRT-OFX/releases/download/1.2.12/ME_OpenDRT_v1.2.12_linux_x86_64_cuda_opencl_cpu_portable.tar.gz",
-      "sha256": "ac6d85bce12c6d7fc4c75ae69bee0e9b518dc2ae48eb2e413d826edc78b3a6e6",
+      "downloadUrl": "https://github.com/MoazElgabry/ME_OpenDRT-OFX/releases/download/v1.2.13/ME_OpenDRT_v1.2.13_linux_x86_64_cuda_opencl_cpu_portable.tar.gz",
+      "sha256": "c4b381b189b8afeaece2679cadfe69a46e80a1c918ddcce8e349dd4d8e5ecacd",
       "packageType": "tar.gz",
       "bundleName": "ME_OpenDRT.ofx.bundle",
       "bundleIdentifier": "com.moazelgabry.me-opendrt",
