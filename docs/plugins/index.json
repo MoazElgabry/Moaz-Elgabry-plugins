@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-19T15:59:55.272Z",
+  "generatedAt": "2026-05-19T16:12:09.133Z",
   "plugins": [
     {
       "pluginId": "chromaspace",
@@ -12,8 +12,7 @@
     {
       "pluginId": "lensdiff",
       "displayName": "LensDiff",
-      "manifestUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugins/lensdiff/stable.json",
-      "stableManifestUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugins/lensdiff/stable.json",
+      "manifestUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugins/lensdiff/beta.json",
       "betaManifestUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugins/lensdiff/beta.json",
       "iconUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugin-icons/lensdiff.png"
     },
