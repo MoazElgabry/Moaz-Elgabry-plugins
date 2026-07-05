@@ -3,7 +3,7 @@
   "displayName": "Chromaspace",
   "iconUrl": "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugin-icons/chromaspace.png",
   "version": "2.0.0-Beta",
-  "releaseDate": "2026-06-27T19:17:43Z",
+  "releaseDate": "2026-07-05T23:27:33Z",
   "releaseNotesUrl": "https://github.com/MoazElgabry/Chromaspace/releases/tag/v2.0.0-Beta",
   "releaseHighlights": "Chromaspace 2.0 beta is a major viewer-focused update. The viewer is now closer to a standalone analysis workspace, with more controls moved out of the OFX panel and into the viewer itself.\nWhat’s New\n- Multi-window viewer workspace: add multiple plots, resize them, and arrange them into split, triple, quadrant, or six-view layouts.\n- New plot types: Waveform and Histogram are now available alongside Cube, Chromaticity, Gloss View, and the existing color models.\n- Per-window settings: each plot window can have its own model, camera/view, appearance, and analysis settings.\n- Better viewer menu: most viewer-side controls now live inside the viewer, reducing the need to adjust OFX parameters in Resolve.\nIdentity and gray ramp workflow improvements: automatic resolution detection, better generator-instance communication, and clearer disabled states when required data is unavailable.\n- Image lasso workflow: viewer control for Resolve’s OFX overlay lasso, with clearer prompts when the Chromaspace node needs to be selected.\n- Resolve bridge support: bundled helper script improves refresh behavior, node detection, lasso coordination, and identity/ramp communication. Sadly, as this relies on Resolve's scripting API, it means Chromaspace won't be supported on the free version of Resolve anymore.",
   "diagnostics": {
@@ -26,8 +26,8 @@
     {
       "platform": "windows",
       "arch": "x86_64",
-      "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/v2.0.0-Beta/Chromaspace_v2.0.0-beta_windows_x86_64_portable.zip",
-      "sha256": "b34200a913f896372f83f61e532725d005f6181ce5794af56f5ceaad0f07e40f",
+      "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/v2.0.0-Beta/Chromaspace_v2.0.beta_windows_x86_64_portable.zip",
+      "sha256": "2f6fb39485fa4dfd81e6c4ac383dfcc669ddf632f91552ed43c8b01e64adbdd1",
       "packageType": "zip",
       "bundleName": "Chromaspace.ofx.bundle",
       "bundleIdentifier": "com.moazelgabry.Chromaspace",
@@ -47,8 +47,8 @@
     {
       "platform": "macos",
       "arch": "universal",
-      "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/v2.0.0-Beta/Chromaspace_v2.0.0-beta_macOS_universal_portable.zip",
-      "sha256": "cd0c37a18c7437d3f0a804252d681d2ef9a59efbd1f97719e73785dd6cd04416",
+      "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/v2.0.0-Beta/Chromaspace_v2.0.beta_macOS_universal_portable.zip",
+      "sha256": "5745901a25fd49dda2cbfce657ceef27944093e462f5df30d28030a7ff7079c5",
       "packageType": "zip",
       "bundleName": "Chromaspace.ofx.bundle",
       "bundleIdentifier": "com.moazelgabry.Chromaspace",
@@ -68,8 +68,8 @@
     {
       "platform": "linux",
       "arch": "x86_64",
-      "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/v2.0.0-Beta/Chromaspace_v2.0.0-beta_linux_x86_64_cuda_opencl_cpu_portable.tar.gz",
-      "sha256": "ef1d41d6e19607f6202e785e19a7e5732a0669cd684dcffb80b615eaf2c43c4c",
+      "downloadUrl": "https://github.com/MoazElgabry/Chromaspace/releases/download/v2.0.0-Beta/Chromaspace_v2.0.beta_linux_x86_64_cuda_opencl_cpu_portable.tar.gz",
+      "sha256": "c4481990f6dd6299334eb2a7aa2fe01718dce3e4c042d37f429babad0f33221c",
       "packageType": "tar.gz",
       "bundleName": "Chromaspace.ofx.bundle",
       "bundleIdentifier": "com.moazelgabry.Chromaspace",
