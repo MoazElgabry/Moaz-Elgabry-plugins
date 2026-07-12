@@ -7,7 +7,7 @@
   "releaseNotesUrl": "https://github.com/MoazElgabry/ME_OpenDRT-OFX/releases/tag/v1.2.14",
   "releaseHighlights": "- Stability Improvements.",
   "diagnostics": {
-    "enabled": false,
+    "enabled": true,
     "logSourcePath": {
       "windows": [
         "%LOCALAPPDATA%\\ME_OpenDRT",
