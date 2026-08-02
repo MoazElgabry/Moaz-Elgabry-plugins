@@ -1,6 +1,24 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { extractDiagnostics, parseBooleanMarker } from "./generate-plugin-channel-manifests.mjs";
+import {
+  bundleIdentifierForChannel,
+  extractDiagnostics,
+  parseBooleanMarker
+} from "./generate-plugin-channel-manifests.mjs";
+
+test("bundleIdentifierForChannel supports stable and beta overrides", () => {
+  const config = {
+    channelBundleIdentifiers: {
+      stable: "com.moazelgabry.Chromaspace",
+      beta: "com.moazelgabry.chromaspace"
+    }
+  };
+  const rule = { bundleIdentifier: "com.example.default" };
+
+  assert.equal(bundleIdentifierForChannel(config, rule, "stable"), "com.moazelgabry.Chromaspace");
+  assert.equal(bundleIdentifierForChannel(config, rule, "beta"), "com.moazelgabry.chromaspace");
+  assert.equal(bundleIdentifierForChannel({}, rule, "stable"), "com.example.default");
+});
 
 test("extractDiagnostics parses hidden JSON comment", () => {
   const body = `

@@ -99,7 +99,30 @@ function validateConfig(config) {
     );
   }
 
+  if (config.channelBundleIdentifiers !== undefined) {
+    assert(
+      config.channelBundleIdentifiers &&
+        typeof config.channelBundleIdentifiers === "object" &&
+        !Array.isArray(config.channelBundleIdentifiers),
+      `${config.pluginId}: channelBundleIdentifiers must be an object when provided`
+    );
+    for (const [channel, bundleIdentifier] of Object.entries(config.channelBundleIdentifiers)) {
+      assert(
+        channel === "stable" || channel === "beta",
+        `${config.pluginId}: channelBundleIdentifiers contains unsupported channel '${channel}'`
+      );
+      assert(
+        typeof bundleIdentifier === "string" && bundleIdentifier.length > 0,
+        `${config.pluginId}: channelBundleIdentifiers.${channel} must be a non-empty string`
+      );
+    }
+  }
+
   config.assetRules.forEach((rule, index) => validateAssetRule(config, rule, index));
+}
+
+function bundleIdentifierForChannel(config, rule, channel) {
+  return config.channelBundleIdentifiers?.[channel] || rule.bundleIdentifier;
 }
 
 function iconUrlForPlugin(pluginId) {
@@ -325,7 +348,7 @@ async function buildReleaseFromGitHubRelease(config, release, options = {}) {
       sha256,
       packageType: rule.packageType,
       bundleName: rule.bundleName,
-      bundleIdentifier: rule.bundleIdentifier,
+      bundleIdentifier: bundleIdentifierForChannel(config, rule, options.channel),
       installPath: rule.installPath,
       minManagerVersion: rule.minManagerVersion || config.minManagerVersion,
       hostProcesses: rule.hostProcesses || config.hostProcesses
@@ -412,7 +435,8 @@ async function generateForConfig(configPath, releasesPath, managerRoot) {
   let stableManifest = null;
   if (stableGitHubReleases.length > 0) {
     const currentStableRelease = await buildReleaseFromGitHubRelease(config, stableGitHubReleases[0], {
-      requireFamilies: true
+      requireFamilies: true,
+      channel: "stable"
     });
 
     const availableStableMarker = config.availableStableMarker || "manager-available-stable";
@@ -421,7 +445,10 @@ async function generateForConfig(configPath, releasesPath, managerRoot) {
       if (!parseBooleanMarker(release.body || "", availableStableMarker)) {
         continue;
       }
-      availableVersions.push(await buildReleaseFromGitHubRelease(config, release, { requireFamilies: false }));
+      availableVersions.push(await buildReleaseFromGitHubRelease(config, release, {
+        requireFamilies: false,
+        channel: "stable"
+      }));
     }
 
     stableManifest = {
@@ -441,7 +468,8 @@ async function generateForConfig(configPath, releasesPath, managerRoot) {
   let betaManifest = null;
   if (betaGitHubReleases.length > 0) {
     const currentBetaRelease = await buildReleaseFromGitHubRelease(config, betaGitHubReleases[0], {
-      requireFamilies: true
+      requireFamilies: true,
+      channel: "beta"
     });
     betaManifest = {
       pluginId: config.pluginId,
@@ -503,6 +531,7 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
 
 export {
   buildReleaseFromGitHubRelease,
+  bundleIdentifierForChannel,
   extractDiagnostics,
   extractReleaseHighlights,
   parseBooleanMarker
