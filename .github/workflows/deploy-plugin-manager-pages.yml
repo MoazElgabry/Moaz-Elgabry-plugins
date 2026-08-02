@@ -42,15 +42,15 @@ jobs:
           mkdir -p tmp/releases tmp/configs
           curl -fsSL \
             -H "Accept: application/vnd.github.raw" \
-            "https://raw.githubusercontent.com/MoazElgabry/Chromaspace/main/manager-release-config.json" \
+            "https://raw.githubusercontent.com/MoazElgabry/Chromaspace/main/manager-release-config.json?cachebust=${{ github.sha }}" \
             -o tmp/configs/chromaspace-manager-release-config.json
           curl -fsSL \
             -H "Accept: application/vnd.github.raw" \
-            "https://raw.githubusercontent.com/MoazElgabry/ME_OpenDRT-OFX/main/manager-release-config.json" \
+            "https://raw.githubusercontent.com/MoazElgabry/ME_OpenDRT-OFX/main/manager-release-config.json?cachebust=${{ github.sha }}" \
             -o tmp/configs/me-opendrt-manager-release-config.json
           curl -fsSL \
             -H "Accept: application/vnd.github.raw" \
-            "https://raw.githubusercontent.com/MoazElgabry/LensDiff/main/manager-release-config.json" \
+            "https://raw.githubusercontent.com/MoazElgabry/LensDiff/main/manager-release-config.json?cachebust=${{ github.sha }}" \
             -o tmp/configs/lensdiff-manager-release-config.json
           curl -fsSL \
             -H "Accept: application/vnd.github+json" \
