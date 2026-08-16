@@ -21,6 +21,7 @@ The plugin manager is a Tauri desktop app that:
 Current managed plugins:
 - Chromaspace
 - ME_OpenDRT
+- Hyogen (invitation-only development builds)
 
 ## Main Repositories
 
@@ -52,6 +53,7 @@ Desktop shell:
 
 Backend:
 - Rust in `src-tauri/src`
+- invitation credentials stored through the native OS credential store (`keyring`)
 
 Important frontend files:
 - `index.html`
@@ -63,6 +65,8 @@ Important backend files:
 - `src-tauri/src/installer.rs`
 - `src-tauri/src/models.rs`
 - `src-tauri/src/settings.rs`
+- `src-tauri/src/credentials.rs`
+- `src-tauri/src/development.rs`
 
 ## Public Hosting And Feeds
 
@@ -142,6 +146,7 @@ Current manager build workflow behavior:
 - skips cleanly when that version is already drafted/published
 - builds Windows, macOS, and Linux packages
 - uploads updater artifacts used by the Tauri updater
+- installs `libdbus-1-dev` and `pkg-config` on Linux for the native Secret Service credential backend
 
 Current Pages workflow behavior:
 - triggers on:
@@ -182,14 +187,39 @@ Current supported channels:
 - stable
 - available stable history
 - beta
-
-Not implemented yet:
-- dev distribution
+- invitation-only stable, beta, and dev releases for Hyogen (manager 0.1.25)
 
 Current rules:
 - `stable.json` exposes the current public stable release
 - `availableVersions` contains older stable versions explicitly marked to remain installable
 - `beta.json` exposes the latest public prerelease
+- the public Pages index and stable/beta manifests remain the source of truth and fallback
+- `Enable Development Builds` forces beta on in both the UI and backend; turning dev off leaves beta on and editable
+- enabled candidates are selected by highest numeric semantic version, with stable then beta then dev winning an equal numeric version
+- retired private releases are selectable only when WordPress marks them `keep_for_rollback`
+- a WordPress failure never removes public plugin cards; the manager shows an actionable development warning instead
+
+## Protected Development Distribution
+
+Production API origin (compiled into the signed manager app):
+- `https://moazelgabry.com/wp-json/moaz-releases/v1`
+
+The built-in allowlist accepts only:
+- plugin slug `hyogen`
+- bundle identifier `com.moazelgabry.hyogen.dev`
+- bundle name `Hyogen.ofx.bundle`
+- Windows `x86_64` ZIP to `C:\Program Files\Common Files\OFX\Plugins`
+- macOS `universal` ZIP to `/Library/OFX/Plugins`
+- Linux `x86_64` TAR.GZ to `/usr/OFX/Plugins`
+- the normal Resolve/Fusion/Nuke/Hiero host-process safety checks
+
+Unknown grants, mismatched bundle identities, incomplete platform sets, unexpected package types, and invalid checksums are ignored with a non-secret warning. The invitation token is never serialized into settings, dashboard state, or the activity log. Connect/replace first validates `GET /dev/catalog`; only then is the `mer_` token written to Keychain, Windows Credential Manager, or the Linux Secret Service. Forget removes it from that credential store.
+
+Bearer authentication is limited to:
+- `GET /dev/catalog`
+- `POST /download-tickets`
+
+The artifact GET uses only the five-minute ticket in the same-origin relative `download_path`; it deliberately carries no bearer token. Existing archive SHA-256 verification, archive extraction, bundle-name verification, bundle-identifier verification, install paths, and host-process checks still run before installation.
 
 Stable-history marker in a published plugin release body:
 

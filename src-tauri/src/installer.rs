@@ -159,7 +159,7 @@ pub async fn apply_plugin_action(
         )?;
         stage_bundle_root.clone()
     } else {
-        let bytes = load_package_bytes(&source_spec.source).await?;
+        let bytes = load_package_bytes(&resolved.package, &source_spec.source).await?;
         verify_archive_hash(&bytes, &resolved.package.sha256)?;
 
         let extracted_root = staging_root.path().join("extract");
@@ -1020,7 +1020,10 @@ fn write_bundle_install_stamp(
     fs::write(&stamp_path, raw).with_context(|| format!("Failed to write {}", stamp_path.display()))
 }
 
-async fn load_package_bytes(source: &str) -> Result<Vec<u8>> {
+async fn load_package_bytes(package: &PlatformPackage, source: &str) -> Result<Vec<u8>> {
+    if let Some(artifact_id) = package.protected_artifact_id {
+        return crate::development::download_protected_artifact(artifact_id).await;
+    }
     if let Ok(local_path) = resolve_local_source_path(source) {
         return fs::read(&local_path)
             .with_context(|| format!("Failed to read {}", local_path.display()));

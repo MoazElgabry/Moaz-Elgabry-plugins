@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 pub struct DashboardState {
     pub manager: ManagerSummary,
     pub catalog_source: String,
+    pub development_warning: Option<String>,
     pub plugins: Vec<PluginStatus>,
 }
 
@@ -19,6 +20,8 @@ pub struct ManagerSummary {
     pub updater_configured: bool,
     pub catalog_url: String,
     pub beta_releases_enabled: bool,
+    pub development_builds_enabled: bool,
+    pub development_invitation_connected: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -29,6 +32,7 @@ pub struct PluginStatus {
     pub icon_url: Option<String>,
     pub latest_version: String,
     pub beta_release: bool,
+    pub release_channel: String,
     pub installed_version: Option<String>,
     pub install_path: String,
     pub bundle_name: String,
@@ -140,6 +144,7 @@ pub struct VersionOption {
     pub is_current_latest: bool,
     pub is_installed: bool,
     pub action_label: String,
+    pub channel: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -155,6 +160,8 @@ pub struct PlatformPackage {
     pub install_path: String,
     pub min_manager_version: String,
     pub host_processes: Vec<String>,
+    #[serde(default)]
+    pub protected_artifact_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -235,6 +242,13 @@ fn classify_error<'a>(
         return (
             "checksum_mismatch",
             "The downloaded plugin package did not match the expected checksum.",
+        );
+    }
+
+    if operation == "development_invitation" {
+        return (
+            "development_invitation_failed",
+            "The development invitation could not be connected.",
         );
     }
 

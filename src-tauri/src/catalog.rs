@@ -24,11 +24,13 @@ pub struct CatalogBundle {
     pub entries: Vec<CatalogEntry>,
     pub manifests: HashMap<String, PluginManifest>,
     pub beta_plugins: HashSet<String>,
+    pub release_channels: HashMap<String, String>,
+    pub development_warning: Option<String>,
 }
 
 pub async fn build_dashboard_state() -> Result<DashboardState> {
     let app_settings = settings::load_settings()?;
-    let bundle = load_catalog_bundle(app_settings.beta_releases_enabled).await?;
+    let bundle = load_catalog_bundle(&app_settings).await?;
     let install_state = installer::load_install_state()?;
     let manager = ManagerSummary {
         app_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -37,6 +39,10 @@ pub async fn build_dashboard_state() -> Result<DashboardState> {
         updater_configured: installer::updater_configured(),
         catalog_url: bundle.source_label.clone(),
         beta_releases_enabled: app_settings.beta_releases_enabled,
+        development_builds_enabled: app_settings.development_builds_enabled,
+        development_invitation_connected: crate::credentials::invitation_token()
+            .unwrap_or(None)
+            .is_some(),
     };
 
     let plugins = bundle
@@ -50,7 +56,11 @@ pub async fn build_dashboard_state() -> Result<DashboardState> {
                 manifest,
                 package,
                 &install_state,
-                bundle.beta_plugins.contains(&entry.plugin_id),
+                bundle
+                    .release_channels
+                    .get(&entry.plugin_id)
+                    .map(String::as_str)
+                    .unwrap_or("stable"),
             ))
         })
         .collect::<Vec<_>>();
@@ -58,6 +68,7 @@ pub async fn build_dashboard_state() -> Result<DashboardState> {
     Ok(DashboardState {
         manager,
         catalog_source: bundle.source,
+        development_warning: bundle.development_warning,
         plugins,
     })
 }
@@ -67,7 +78,7 @@ pub async fn resolve_plugin(
     requested_version: Option<&str>,
 ) -> Result<ResolvedPlugin> {
     let app_settings = settings::load_settings()?;
-    let bundle = load_catalog_bundle(app_settings.beta_releases_enabled).await?;
+    let bundle = load_catalog_bundle(&app_settings).await?;
     let manifest = bundle
         .manifests
         .get(plugin_id)
@@ -88,7 +99,7 @@ fn build_plugin_status(
     manifest: &PluginManifest,
     package: PlatformPackage,
     install_state: &crate::models::ManagedInstallState,
-    beta_release: bool,
+    release_channel: &str,
 ) -> PluginStatus {
     let target_bundle = PathBuf::from(&package.install_path).join(&package.bundle_name);
     let installed = target_bundle.exists();
@@ -148,7 +159,8 @@ fn build_plugin_status(
         display_name: manifest.display_name.clone(),
         icon_url: manifest.icon_url.clone().or(entry.icon_url.clone()),
         latest_version: manifest.version.clone(),
-        beta_release,
+        beta_release: release_channel == "beta",
+        release_channel: release_channel.to_string(),
         installed_version,
         install_path: package.install_path.clone(),
         bundle_name: package.bundle_name.clone(),
@@ -244,6 +256,7 @@ fn version_options(
             installed_version,
             is_current_latest,
         );
+        let channel = channel_for_version(&version).to_string();
         options.push(VersionOption {
             version,
             label,
@@ -253,9 +266,20 @@ fn version_options(
             is_current_latest,
             is_installed,
             action_label,
+            channel,
         });
     }
     options
+}
+
+fn channel_for_version(version: &str) -> &'static str {
+    if version.to_ascii_lowercase().contains("dev") {
+        "dev"
+    } else if is_prerelease_like(version) {
+        "beta"
+    } else {
+        "stable"
+    }
 }
 
 fn determine_channel_switch_mode(
@@ -280,6 +304,20 @@ fn version_option_action_label(
     installed_version: Option<&str>,
     is_current_latest: bool,
 ) -> String {
+    if channel_for_version(version) == "dev" {
+        return match installed_version {
+            Some(current) if current == version => "Reinstall this development build".to_string(),
+            Some(current) => match version_cmp(version, current) {
+                Ordering::Greater if is_current_latest => {
+                    "Install latest development build".to_string()
+                }
+                Ordering::Greater => "Install selected development build".to_string(),
+                Ordering::Less => "Roll back to development build".to_string(),
+                Ordering::Equal => "Install selected development build".to_string(),
+            },
+            None => "Install selected development build".to_string(),
+        };
+    }
     let installed_newer_than_target = installed_version
         .map(|current| version_cmp(current, latest_version) == Ordering::Greater)
         .unwrap_or(false);
@@ -506,7 +544,29 @@ fn resolve_release(
         .ok_or_else(|| anyhow!("Latest plugin version was not found in the manifest"))?)
 }
 
-async fn load_catalog_bundle(prefer_beta: bool) -> Result<CatalogBundle> {
+async fn load_catalog_bundle(app_settings: &settings::AppSettings) -> Result<CatalogBundle> {
+    let mut bundle = load_public_catalog_bundle(app_settings.beta_releases_enabled).await?;
+    if !app_settings.development_builds_enabled {
+        return Ok(bundle);
+    }
+
+    match crate::development::catalog_from_credential().await {
+        Ok(Some(catalog)) => overlay_development_catalog(&mut bundle, catalog),
+        Ok(None) => {
+            bundle.development_warning = Some(
+                "Connect a development invitation to load protected Hyogen builds.".to_string(),
+            );
+        }
+        Err(error) => {
+            bundle.development_warning = Some(format!(
+                "Development builds could not be refreshed. Public stable and beta releases remain available. {error}"
+            ));
+        }
+    }
+    Ok(bundle)
+}
+
+async fn load_public_catalog_bundle(prefer_beta: bool) -> Result<CatalogBundle> {
     if cfg!(debug_assertions) {
         if let Some(bundle) = load_local_dev_catalog(prefer_beta)? {
             return Ok(bundle);
@@ -525,6 +585,7 @@ async fn load_catalog_bundle(prefer_beta: bool) -> Result<CatalogBundle> {
     let mut entries = Vec::new();
     let mut manifests = HashMap::new();
     let mut beta_plugins = HashSet::new();
+    let mut release_channels = HashMap::new();
     for entry in &index.plugins {
         if let Some((manifest, beta_release)) =
             load_manifest_for_entry(&client, entry, prefer_beta).await?
@@ -532,6 +593,10 @@ async fn load_catalog_bundle(prefer_beta: bool) -> Result<CatalogBundle> {
             if beta_release {
                 beta_plugins.insert(entry.plugin_id.clone());
             }
+            release_channels.insert(
+                entry.plugin_id.clone(),
+                if beta_release { "beta" } else { "stable" }.to_string(),
+            );
             manifests.insert(entry.plugin_id.clone(), manifest);
             entries.push(entry.clone());
         }
@@ -543,7 +608,175 @@ async fn load_catalog_bundle(prefer_beta: bool) -> Result<CatalogBundle> {
         entries,
         manifests,
         beta_plugins,
+        release_channels,
+        development_warning: None,
     })
+}
+
+#[derive(Debug, Clone)]
+struct ChannelRelease {
+    channel: String,
+    release: PluginRelease,
+}
+
+fn overlay_development_catalog(
+    bundle: &mut CatalogBundle,
+    catalog: crate::development::ValidatedDevelopmentCatalog,
+) {
+    let warnings = catalog.warnings.clone();
+    let by_plugin = crate::development::releases_by_plugin(catalog);
+    for (plugin_id, development_releases) in by_plugin {
+        if development_releases.is_empty() {
+            continue;
+        }
+
+        let existing = bundle.manifests.get(&plugin_id).cloned();
+        let public_channel = bundle
+            .release_channels
+            .get(&plugin_id)
+            .cloned()
+            .unwrap_or_else(|| "stable".to_string());
+        let mut candidates = Vec::new();
+        let mut all_releases = Vec::new();
+
+        if let Some(manifest) = &existing {
+            let public_releases = collect_releases(manifest);
+            if let Some(current) = public_releases
+                .iter()
+                .find(|release| release.version == manifest.version)
+            {
+                candidates.push(ChannelRelease {
+                    channel: public_channel.clone(),
+                    release: current.clone(),
+                });
+            }
+            all_releases.extend(public_releases.into_iter().map(|release| ChannelRelease {
+                channel: channel_for_version(&release.version).to_string(),
+                release,
+            }));
+        }
+
+        for development in development_releases {
+            if development.state == "published" {
+                candidates.push(ChannelRelease {
+                    channel: development.channel.clone(),
+                    release: development.release.clone(),
+                });
+                all_releases.push(ChannelRelease {
+                    channel: development.channel,
+                    release: development.release,
+                });
+            } else if development.state == "retired" && development.keep_for_rollback {
+                all_releases.push(ChannelRelease {
+                    channel: development.channel,
+                    release: development.release,
+                });
+            }
+        }
+
+        let Some(target) = candidates.into_iter().max_by(compare_channel_releases) else {
+            continue;
+        };
+        let mut versions: HashMap<String, ChannelRelease> = HashMap::new();
+        for candidate in all_releases {
+            let should_replace = versions
+                .get(&candidate.release.version)
+                .map(|current| {
+                    channel_priority(&candidate.channel) < channel_priority(&current.channel)
+                })
+                .unwrap_or(true);
+            if should_replace {
+                versions.insert(candidate.release.version.clone(), candidate);
+            }
+        }
+        let mut available_versions = versions
+            .into_values()
+            .filter(|candidate| candidate.release.version != target.release.version)
+            .map(|candidate| candidate.release)
+            .collect::<Vec<_>>();
+        available_versions.sort_by(|left, right| version_cmp(&right.version, &left.version));
+
+        let manifest = PluginManifest {
+            plugin_id: plugin_id.clone(),
+            display_name: existing
+                .as_ref()
+                .map(|manifest| manifest.display_name.clone())
+                .unwrap_or_else(|| "Hyogen".to_string()),
+            icon_url: existing
+                .as_ref()
+                .and_then(|manifest| manifest.icon_url.clone()),
+            version: target.release.version.clone(),
+            release_date: target.release.release_date.clone(),
+            release_notes_url: target.release.release_notes_url.clone(),
+            release_highlights: target.release.release_highlights.clone(),
+            diagnostics: target.release.diagnostics.clone(),
+            platforms: target.release.platforms.clone(),
+            available_versions,
+        };
+
+        if !bundle
+            .entries
+            .iter()
+            .any(|entry| entry.plugin_id == plugin_id)
+        {
+            bundle.entries.push(CatalogEntry {
+                plugin_id: plugin_id.clone(),
+                display_name: "Hyogen".to_string(),
+                manifest_url: String::new(),
+                stable_manifest_url: None,
+                beta_manifest_url: None,
+                icon_url: None,
+            });
+        }
+        bundle.manifests.insert(plugin_id.clone(), manifest);
+        bundle
+            .release_channels
+            .insert(plugin_id.clone(), target.channel.clone());
+        if target.channel == "beta" {
+            bundle.beta_plugins.insert(plugin_id.clone());
+        } else {
+            bundle.beta_plugins.remove(&plugin_id);
+        }
+        bundle.source = format!("{}+development", bundle.source);
+    }
+
+    if !warnings.is_empty() {
+        bundle.development_warning = Some(warnings.join(" "));
+    }
+}
+
+fn compare_channel_releases(left: &ChannelRelease, right: &ChannelRelease) -> Ordering {
+    numeric_version_cmp(&left.release.version, &right.release.version)
+        .then_with(|| channel_priority(&right.channel).cmp(&channel_priority(&left.channel)))
+}
+
+fn numeric_version_cmp(left: &str, right: &str) -> Ordering {
+    match (parse_loose_version(left), parse_loose_version(right)) {
+        (Some(left), Some(right)) => {
+            let length = left.core.len().max(right.core.len());
+            for index in 0..length {
+                let comparison = left
+                    .core
+                    .get(index)
+                    .unwrap_or(&0)
+                    .cmp(right.core.get(index).unwrap_or(&0));
+                if comparison != Ordering::Equal {
+                    return comparison;
+                }
+            }
+            Ordering::Equal
+        }
+        _ => version_cmp(left, right),
+    }
+}
+
+fn channel_priority(channel: &str) -> u8 {
+    match channel {
+        "stable" => 0,
+        "beta" => 1,
+        "dev" => 2,
+        _ => u8::MAX,
+    }
 }
 
 async fn load_manifest_for_entry(
@@ -642,6 +875,7 @@ fn load_local_dev_catalog(prefer_beta: bool) -> Result<Option<CatalogBundle>> {
     let mut entries = Vec::new();
     let mut manifests = HashMap::new();
     let mut beta_plugins = HashSet::new();
+    let mut release_channels = HashMap::new();
     for entry in &index.plugins {
         if let Some((manifest, beta_release)) =
             load_local_manifest_for_entry(entry, manager_root, prefer_beta)?
@@ -649,6 +883,10 @@ fn load_local_dev_catalog(prefer_beta: bool) -> Result<Option<CatalogBundle>> {
             if beta_release {
                 beta_plugins.insert(entry.plugin_id.clone());
             }
+            release_channels.insert(
+                entry.plugin_id.clone(),
+                if beta_release { "beta" } else { "stable" }.to_string(),
+            );
             manifests.insert(entry.plugin_id.clone(), manifest);
             entries.push(entry.clone());
         }
@@ -660,6 +898,8 @@ fn load_local_dev_catalog(prefer_beta: bool) -> Result<Option<CatalogBundle>> {
         entries,
         manifests,
         beta_plugins,
+        release_channels,
+        development_warning: None,
     }))
 }
 
@@ -877,6 +1117,7 @@ mod tests {
             install_path: "C:\\Test\\Plugins".to_string(),
             min_manager_version: "0.1.0".to_string(),
             host_processes: Vec::new(),
+            protected_artifact_id: None,
         }
     }
 
@@ -918,6 +1159,112 @@ mod tests {
             beta_manifest_url: None,
             icon_url: None,
         }
+    }
+
+    fn channel_release(version: &str, channel: &str) -> ChannelRelease {
+        ChannelRelease {
+            channel: channel.to_string(),
+            release: test_release(version),
+        }
+    }
+
+    #[test]
+    fn target_selection_uses_numeric_version_then_stable_beta_dev_priority() {
+        let candidates = [
+            channel_release("1.9.9", "stable"),
+            channel_release("2.0.0-dev.1", "dev"),
+        ];
+        assert_eq!(
+            candidates
+                .iter()
+                .max_by(|left, right| compare_channel_releases(left, right))
+                .unwrap()
+                .channel,
+            "dev"
+        );
+
+        let tied = [
+            channel_release("2.0.0", "stable"),
+            channel_release("2.0.0-beta.2", "beta"),
+            channel_release("2.0.0-dev.9", "dev"),
+        ];
+        assert_eq!(
+            tied.iter()
+                .max_by(|left, right| compare_channel_releases(left, right))
+                .unwrap()
+                .channel,
+            "stable"
+        );
+    }
+
+    #[test]
+    fn development_warning_preserves_public_catalog_and_pages_url() {
+        let manifest = test_manifest("1.0.0", &[]);
+        let entry = test_catalog_entry(
+            "https://moazelgabry.github.io/Moaz-Elgabry-plugins/plugins/example/stable.json",
+        );
+        let mut bundle = CatalogBundle {
+            source: "remote".to_string(),
+            source_label: DEFAULT_CATALOG_URL.to_string(),
+            entries: vec![entry.clone()],
+            manifests: HashMap::from([(entry.plugin_id.clone(), manifest)]),
+            beta_plugins: HashSet::new(),
+            release_channels: HashMap::from([(entry.plugin_id.clone(), "stable".to_string())]),
+            development_warning: None,
+        };
+        overlay_development_catalog(
+            &mut bundle,
+            crate::development::ValidatedDevelopmentCatalog {
+                releases: Vec::new(),
+                warnings: vec!["Ignored an unrecognized development grant.".to_string()],
+            },
+        );
+
+        assert!(bundle.manifests.contains_key(&entry.plugin_id));
+        assert_eq!(bundle.source_label, DEFAULT_CATALOG_URL);
+        assert!(bundle.development_warning.is_some());
+    }
+
+    #[test]
+    fn retired_development_release_is_selectable_but_never_the_target() {
+        let mut published = crate::development::ValidatedDevelopmentRelease {
+            channel: "dev".to_string(),
+            state: "published".to_string(),
+            keep_for_rollback: true,
+            release: test_release("2.0.0-dev.1"),
+        };
+        for package in &mut published.release.platforms {
+            package.bundle_name = "Hyogen.ofx.bundle".to_string();
+            package.bundle_identifier = "com.moazelgabry.hyogen.dev".to_string();
+            package.protected_artifact_id = Some(1);
+        }
+        let mut retired = published.clone();
+        retired.release.version = "1.8.0-dev.2".to_string();
+        retired.state = "retired".to_string();
+
+        let mut bundle = CatalogBundle {
+            source: "remote".to_string(),
+            source_label: DEFAULT_CATALOG_URL.to_string(),
+            entries: Vec::new(),
+            manifests: HashMap::new(),
+            beta_plugins: HashSet::new(),
+            release_channels: HashMap::new(),
+            development_warning: None,
+        };
+        overlay_development_catalog(
+            &mut bundle,
+            crate::development::ValidatedDevelopmentCatalog {
+                releases: vec![published, retired],
+                warnings: Vec::new(),
+            },
+        );
+
+        let manifest = bundle.manifests.get("hyogen").unwrap();
+        assert_eq!(manifest.version, "2.0.0-dev.1");
+        assert!(manifest
+            .available_versions
+            .iter()
+            .any(|release| release.version == "1.8.0-dev.2"));
     }
 
     #[test]

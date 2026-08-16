@@ -56,6 +56,30 @@
                 </span>
                 <input id="beta-releases-toggle" type="checkbox" />
               </label>
+              <label class="toggle-row" for="development-builds-toggle">
+                <span>
+                  <strong>Enable Development Builds</strong>
+                  <small>Use invitation-only Hyogen development builds. Beta releases are required.</small>
+                </span>
+                <input id="development-builds-toggle" type="checkbox" />
+              </label>
+              <div class="development-access">
+                <label for="development-invitation-token">Development invitation</label>
+                <div class="development-access-row">
+                  <input
+                    id="development-invitation-token"
+                    type="password"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="mer_..."
+                    aria-describedby="development-access-status"
+                  />
+                  <button id="connect-development-invitation" type="button">Connect</button>
+                  <button id="forget-development-invitation" type="button" class="subtle-button">Forget</button>
+                </div>
+                <small id="development-access-status">No invitation connected.</small>
+                <p id="development-warning" class="development-warning hidden" role="status"></p>
+              </div>
             </details>
           </section>
         </div>

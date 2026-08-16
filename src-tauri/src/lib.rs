@@ -1,4 +1,6 @@
 mod catalog;
+mod credentials;
+mod development;
 mod installer;
 mod models;
 mod settings;
@@ -35,9 +37,40 @@ async fn apply_plugin_action(
 async fn set_beta_releases_enabled(enabled: bool) -> Result<(), String> {
     let mut current = settings::load_settings()
         .map_err(|error| models::UiError::from_error("settings", &error).to_json_string())?;
-    current.beta_releases_enabled = enabled;
+    current.beta_releases_enabled = enabled || current.development_builds_enabled;
     settings::save_settings(&current)
         .map_err(|error| models::UiError::from_error("settings", &error).to_json_string())
+}
+
+#[tauri::command]
+async fn set_development_builds_enabled(enabled: bool) -> Result<(), String> {
+    let mut current = settings::load_settings()
+        .map_err(|error| models::UiError::from_error("settings", &error).to_json_string())?;
+    current.development_builds_enabled = enabled;
+    if enabled {
+        current.beta_releases_enabled = true;
+    }
+    settings::save_settings(&current)
+        .map_err(|error| models::UiError::from_error("settings", &error).to_json_string())
+}
+
+#[tauri::command]
+async fn connect_development_invitation(token: String) -> Result<(), String> {
+    crate::development::validate_token_and_catalog(&token)
+        .await
+        .map_err(|error| {
+            models::UiError::from_error("development_invitation", &error).to_json_string()
+        })?;
+    crate::credentials::store_invitation_token(&token).map_err(|error| {
+        models::UiError::from_error("development_invitation", &error).to_json_string()
+    })
+}
+
+#[tauri::command]
+async fn forget_development_invitation() -> Result<(), String> {
+    crate::credentials::forget_invitation_token().map_err(|error| {
+        models::UiError::from_error("development_invitation", &error).to_json_string()
+    })
 }
 
 #[tauri::command]
@@ -131,6 +164,9 @@ pub fn run() {
             export_plugin_logs,
             check_plugin_log_export_ready,
             set_beta_releases_enabled,
+            set_development_builds_enabled,
+            connect_development_invitation,
+            forget_development_invitation,
             open_support_link
         ])
         .setup(|app| {

@@ -418,6 +418,63 @@ h4 {
   cursor: pointer;
 }
 
+.toggle-row.forced-toggle {
+  cursor: default;
+  opacity: 0.62;
+}
+
+.development-access {
+  display: grid;
+  gap: 0.42rem;
+  margin-top: 0.8rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.development-access > label {
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.development-access-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.42rem;
+}
+
+.development-access-row input {
+  min-width: 0;
+  padding: 0.58rem 0.68rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--text);
+}
+
+.development-access-row button {
+  padding: 0.55rem 0.7rem;
+}
+
+.development-access small {
+  color: rgba(255, 255, 255, 0.58);
+  line-height: 1.35;
+}
+
+.development-warning {
+  margin: 0.15rem 0 0;
+  padding: 0.55rem 0.62rem;
+  border: 1px solid rgba(255, 188, 92, 0.28);
+  border-radius: 9px;
+  background: rgba(255, 160, 49, 0.09);
+  color: #ffd096;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.hidden {
+  display: none !important;
+}
+
 .alert-banner {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -695,7 +752,7 @@ h4 {
   line-height: 0.98;
 }
 
-.plugin-beta-tag {
+.plugin-channel-tag {
   display: inline-flex;
   align-items: center;
   min-height: 1.32rem;
@@ -709,6 +766,12 @@ h4 {
   font-weight: 800;
   line-height: 1;
   text-transform: uppercase;
+}
+
+.plugin-dev-tag {
+  border-color: rgba(111, 184, 255, 0.38);
+  background: rgba(77, 154, 255, 0.16);
+  color: #9fceff;
 }
 
 .plugin-meta {

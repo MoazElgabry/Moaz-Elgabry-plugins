@@ -17,6 +17,12 @@ const elements = {
   catalogSource: document.querySelector("#catalog-source"),
   updaterStatus: document.querySelector("#updater-status"),
   betaToggle: document.querySelector("#beta-releases-toggle"),
+  developmentToggle: document.querySelector("#development-builds-toggle"),
+  developmentToken: document.querySelector("#development-invitation-token"),
+  developmentConnect: document.querySelector("#connect-development-invitation"),
+  developmentForget: document.querySelector("#forget-development-invitation"),
+  developmentStatus: document.querySelector("#development-access-status"),
+  developmentWarning: document.querySelector("#development-warning"),
   refreshButton: document.querySelector("#refresh-button"),
   updateButton: document.querySelector("#check-updates-button"),
   supportButton: document.querySelector("#support-button"),
@@ -52,6 +58,27 @@ function setBusy(nextBusy) {
   document.querySelectorAll("button, select, input").forEach((element) => {
     element.disabled = nextBusy;
   });
+  if (!nextBusy) {
+    applyReleaseControlState();
+  }
+}
+
+function applyReleaseControlState() {
+  const manager = state.dashboard?.manager;
+  if (!manager) return;
+  const developmentEnabled = Boolean(manager.developmentBuildsEnabled);
+  const invitationConnected = Boolean(manager.developmentInvitationConnected);
+  elements.betaToggle.checked = Boolean(manager.betaReleasesEnabled) || developmentEnabled;
+  elements.betaToggle.disabled = state.busy || developmentEnabled;
+  elements.betaToggle.closest(".toggle-row")?.classList.toggle("forced-toggle", developmentEnabled);
+  elements.developmentToggle.checked = developmentEnabled;
+  elements.developmentToggle.disabled = state.busy;
+  elements.developmentConnect.textContent = invitationConnected ? "Replace" : "Connect";
+  elements.developmentForget.classList.toggle("hidden", !invitationConnected);
+  elements.developmentForget.disabled = state.busy || !invitationConnected;
+  elements.developmentStatus.textContent = invitationConnected
+    ? "Invitation connected securely in the operating system credential store."
+    : "No invitation connected.";
 }
 
 function operationSteps(kind) {
@@ -547,7 +574,8 @@ function diagnosticsAvailable(plugin) {
 function pluginNameMarkup(plugin) {
   return `
     <span>${escapeHtml(plugin.displayName)}</span>
-    ${plugin.betaRelease ? '<span class="plugin-beta-tag">Beta</span>' : ""}
+    ${plugin.releaseChannel === "dev" ? '<span class="plugin-channel-tag plugin-dev-tag">Development</span>' : ""}
+    ${plugin.betaRelease ? '<span class="plugin-channel-tag plugin-beta-tag">Beta</span>' : ""}
   `;
 }
 
@@ -764,7 +792,9 @@ function renderDashboard() {
   elements.platform.textContent = `${manager.platform} / ${manager.arch}`;
   elements.catalogSource.textContent = `${state.dashboard.catalogSource} feed`;
   elements.updaterStatus.textContent = manager.updaterConfigured ? "Configured" : "Not configured";
-  elements.betaToggle.checked = Boolean(manager.betaReleasesEnabled);
+  elements.developmentWarning.textContent = state.dashboard.developmentWarning ?? "";
+  elements.developmentWarning.classList.toggle("hidden", !state.dashboard.developmentWarning);
+  applyReleaseControlState();
   renderPlugins();
 }
 
@@ -780,6 +810,62 @@ async function updateBetaReleasesPreference(enabled) {
     const parsed = parseUiError(error, "Couldn't update beta release settings.");
     showAlert(parsed);
     logActivity(`Beta release setting failed: ${parsed.summary}`);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function updateDevelopmentBuildsPreference(enabled) {
+  setBusy(true);
+  try {
+    hideAlert();
+    await invoke("set_development_builds_enabled", { enabled });
+    logActivity(enabled ? "Development builds enabled; beta releases are also enabled." : "Development builds disabled.");
+    await refreshDashboard();
+  } catch (error) {
+    const parsed = parseUiError(error, "Couldn't update development build settings.");
+    showAlert(parsed);
+    logActivity(`Development build setting failed: ${parsed.summary}`);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function connectDevelopmentInvitation() {
+  const token = elements.developmentToken.value.trim();
+  if (!token) {
+    showAlert({ summary: "Enter a development invitation key first.", details: "Invitation keys begin with mer_." });
+    return;
+  }
+  setBusy(true);
+  try {
+    hideAlert();
+    await invoke("connect_development_invitation", { token });
+    elements.developmentToken.value = "";
+    logActivity("Development invitation connected securely.");
+    await refreshDashboard();
+  } catch (error) {
+    elements.developmentToken.value = "";
+    const parsed = parseUiError(error, "Couldn't connect the development invitation.");
+    showAlert(parsed);
+    logActivity(`Development invitation failed: ${parsed.summary}`);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function forgetDevelopmentInvitation() {
+  setBusy(true);
+  try {
+    hideAlert();
+    await invoke("forget_development_invitation");
+    elements.developmentToken.value = "";
+    logActivity("Development invitation removed from the credential store.");
+    await refreshDashboard();
+  } catch (error) {
+    const parsed = parseUiError(error, "Couldn't forget the development invitation.");
+    showAlert(parsed);
+    logActivity(`Forget invitation failed: ${parsed.summary}`);
   } finally {
     setBusy(false);
   }
@@ -1006,6 +1092,11 @@ elements.alertDismiss.addEventListener("click", hideAlert);
 elements.betaToggle.addEventListener("change", (event) => {
   updateBetaReleasesPreference(event.currentTarget.checked);
 });
+elements.developmentToggle.addEventListener("change", (event) => {
+  updateDevelopmentBuildsPreference(event.currentTarget.checked);
+});
+elements.developmentConnect.addEventListener("click", connectDevelopmentInvitation);
+elements.developmentForget.addEventListener("click", forgetDevelopmentInvitation);
 elements.releaseHighlightsClose.addEventListener("click", closeReleaseHighlightsDialog);
 elements.releaseHighlightsDialog.addEventListener("cancel", (event) => {
   event.preventDefault();
