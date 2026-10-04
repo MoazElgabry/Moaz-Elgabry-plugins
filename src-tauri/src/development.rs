@@ -1,5 +1,6 @@
 use crate::credentials;
 use crate::models::{AdditionalBundle, PlatformPackage, PluginDiagnostics, PluginRelease};
+use crate::operation_progress::OperationProgressReporter;
 use anyhow::{anyhow, bail, Context, Result};
 use reqwest::header::AUTHORIZATION;
 use reqwest::{Client, Request, Url};
@@ -172,6 +173,14 @@ fn validate_catalog(catalog: DevelopmentCatalogResponse) -> Result<ValidatedDeve
         ..Default::default()
     };
     for raw in catalog.releases {
+        if raw.plugin.slug != "hyogen" {
+            continue;
+        }
+        if let Some(grants) = validated.plugin_grants.as_ref() {
+            if !grants.iter().any(|grant| grant == &raw.plugin.slug) {
+                continue;
+            }
+        }
         match validate_release(raw) {
             Ok(release) => validated.releases.push(release),
             Err(warning) => validated.warnings.push(warning.to_string()),
@@ -382,11 +391,15 @@ fn first_nonempty(highlights: String, notes: String) -> Option<String> {
     }
 }
 
-pub async fn download_protected_artifact(artifact_id: u64) -> Result<Vec<u8>> {
+pub async fn download_protected_artifact(
+    artifact_id: u64,
+    progress: &OperationProgressReporter,
+) -> Result<Vec<u8>> {
     let token = credentials::invitation_token()?.ok_or_else(|| {
         anyhow!("Connect a development invitation before downloading this build.")
     })?;
     let client = production_client()?;
+    progress.update(Some(10), "Requesting protected package", None);
     let ticket = client
         .post(format!("{DEV_API_BASE}/download-tickets"))
         .bearer_auth(&token)
@@ -402,16 +415,16 @@ pub async fn download_protected_artifact(artifact_id: u64) -> Result<Vec<u8>> {
 
     let download_url = ticket_download_url(&ticket.download_path, artifact_id, &ticket.ticket)?;
     let request = build_ticket_download_request(&client, download_url)?;
-    let bytes = client
+    let response = client
         .execute(request)
         .await
         .context("Failed to download the protected development artifact")?
         .error_for_status()
-        .context("The protected development artifact could not be downloaded")?
-        .bytes()
+        .context("The protected development artifact could not be downloaded")?;
+    progress
+        .download_response(response, 12, 70, "Downloading plugin package")
         .await
-        .context("Failed to read the protected development artifact")?;
-    Ok(bytes.to_vec())
+        .context("Failed to read the protected development artifact")
 }
 
 fn production_client() -> Result<Client> {

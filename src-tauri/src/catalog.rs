@@ -4,10 +4,12 @@ use crate::models::{
     PluginManifest, PluginRelease, PluginStatus, ResolvedPlugin, VersionOption,
 };
 use crate::settings;
+use crate::operation_progress::OperationProgressReporter;
 use anyhow::{anyhow, Context, Result};
 use reqwest::header::{CACHE_CONTROL, PRAGMA};
 use reqwest::Client;
 use serde::de::DeserializeOwned;
+use semver::Version;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -29,9 +31,11 @@ pub struct CatalogBundle {
     pub development_invitation_has_access: Option<bool>,
 }
 
-pub async fn build_dashboard_state() -> Result<DashboardState> {
+pub async fn build_dashboard_state(
+    progress: Option<OperationProgressReporter>,
+) -> Result<DashboardState> {
     let app_settings = settings::load_settings()?;
-    let bundle = load_catalog_bundle(&app_settings).await?;
+    let bundle = load_catalog_bundle(&app_settings, progress.as_ref(), (0, 86)).await?;
     let install_state = installer::load_install_state()?;
     let manager = ManagerSummary {
         app_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -52,6 +56,9 @@ pub async fn build_dashboard_state() -> Result<DashboardState> {
         .iter()
         .filter_map(|entry| {
             let manifest = bundle.manifests.get(&entry.plugin_id)?;
+            if manifest.plugin_id != entry.plugin_id {
+                return None;
+            }
             let package = select_package(&manifest.platforms).ok()?;
             Some(build_plugin_status(
                 entry,
@@ -67,6 +74,10 @@ pub async fn build_dashboard_state() -> Result<DashboardState> {
         })
         .collect::<Vec<_>>();
 
+    if let Some(progress) = &progress {
+        progress.update(Some(92), "Checking installed plugins", None);
+    }
+
     Ok(DashboardState {
         manager,
         catalog_source: bundle.source,
@@ -78,22 +89,50 @@ pub async fn build_dashboard_state() -> Result<DashboardState> {
 pub async fn resolve_plugin(
     plugin_id: &str,
     requested_version: Option<&str>,
+    progress: Option<&OperationProgressReporter>,
+    progress_span: (u8, u8),
 ) -> Result<ResolvedPlugin> {
     let app_settings = settings::load_settings()?;
-    let bundle = load_catalog_bundle(&app_settings).await?;
+    let bundle = load_catalog_bundle(&app_settings, progress, progress_span).await?;
     let manifest = bundle
         .manifests
         .get(plugin_id)
         .cloned()
         .ok_or_else(|| anyhow!("Plugin manifest not found for `{plugin_id}`"))?;
+    if manifest.plugin_id != plugin_id {
+        return Err(anyhow!(
+            "Plugin manifest identity mismatch: catalog requested `{plugin_id}`, but the manifest declares `{}`",
+            manifest.plugin_id
+        ));
+    }
     let release = resolve_release(&manifest, requested_version)?;
     let package = select_package(&release.platforms)?;
+    ensure_manager_version_compatible(&package.min_manager_version)?;
     Ok(ResolvedPlugin {
         manifest,
         version: release.version,
-        release_notes_url: release.release_notes_url,
         package,
     })
+}
+
+fn ensure_manager_version_compatible(required_version: &str) -> Result<()> {
+    let current_version = env!("CARGO_PKG_VERSION");
+    ensure_version_compatible(current_version, required_version)
+}
+
+fn ensure_version_compatible(current_version: &str, required_version: &str) -> Result<()> {
+    let required = Version::parse(required_version).with_context(|| {
+        format!("Plugin package declares an invalid minimum manager version `{required_version}`")
+    })?;
+    let current = Version::parse(current_version)
+        .with_context(|| format!("Plugin Manager version `{current_version}` is invalid"))?;
+
+    if current < required {
+        return Err(anyhow!(
+            "This plugin package requires Plugin Manager {required} or newer; this manager is {current}."
+        ));
+    }
+    Ok(())
 }
 
 fn build_plugin_status(
@@ -185,7 +224,11 @@ fn build_plugin_status(
 
     PluginStatus {
         plugin_id: entry.plugin_id.clone(),
-        display_name: manifest.display_name.clone(),
+        display_name: if manifest.display_name.trim().is_empty() {
+            entry.display_name.clone()
+        } else {
+            manifest.display_name.clone()
+        },
         icon_url: manifest.icon_url.clone().or(entry.icon_url.clone()),
         latest_version: manifest.version.clone(),
         beta_release: release_channel == "beta",
@@ -578,12 +621,45 @@ fn resolve_release(
         .ok_or_else(|| anyhow!("Latest plugin version was not found in the manifest"))?)
 }
 
-async fn load_catalog_bundle(app_settings: &settings::AppSettings) -> Result<CatalogBundle> {
-    let mut bundle = load_public_catalog_bundle(app_settings.beta_releases_enabled).await?;
+async fn load_catalog_bundle(
+    app_settings: &settings::AppSettings,
+    progress: Option<&OperationProgressReporter>,
+    progress_span: (u8, u8),
+) -> Result<CatalogBundle> {
+    if let Some(progress) = progress {
+        progress.update(Some(progress_span.0), "Connecting to plugin catalog", None);
+    }
+    let range = progress_span.1.saturating_sub(progress_span.0);
+    let public_span = (
+        progress_span.0,
+        progress_span
+            .0
+            .saturating_add(((range as u16 * 3) / 4) as u8),
+    );
+    let mut bundle = load_public_catalog_bundle(
+        app_settings.beta_releases_enabled,
+        progress,
+        public_span,
+    )
+    .await?;
     if !app_settings.development_builds_enabled {
+        if let Some(progress) = progress {
+            progress.update(
+                Some(progress_span.1),
+                "Plugin catalog loaded",
+                Some(format!("{} plugins available", bundle.entries.len())),
+            );
+        }
         return Ok(bundle);
     }
 
+    if let Some(progress) = progress {
+        progress.update(
+            Some(public_span.1),
+            "Refreshing development access",
+            None,
+        );
+    }
     match crate::development::catalog_from_credential().await {
         Ok(Some(catalog)) => {
             bundle.development_invitation_has_access = catalog
@@ -615,12 +691,30 @@ async fn load_catalog_bundle(app_settings: &settings::AppSettings) -> Result<Cat
             });
         }
     }
+    if let Some(progress) = progress {
+        progress.update(
+            Some(progress_span.1),
+            "Loading development releases",
+            Some("Catalog entries loaded".to_string()),
+        );
+    }
     Ok(bundle)
 }
 
-async fn load_public_catalog_bundle(prefer_beta: bool) -> Result<CatalogBundle> {
+async fn load_public_catalog_bundle(
+    prefer_beta: bool,
+    progress: Option<&OperationProgressReporter>,
+    progress_span: (u8, u8),
+) -> Result<CatalogBundle> {
     if cfg!(debug_assertions) {
         if let Some(bundle) = load_local_dev_catalog(prefer_beta)? {
+            if let Some(progress) = progress {
+                progress.update(
+                    Some(progress_span.1),
+                    "Loading plugin releases",
+                    Some(format!("{} local plugin entries", bundle.entries.len())),
+                );
+            }
             return Ok(bundle);
         }
     }
@@ -633,12 +727,20 @@ async fn load_public_catalog_bundle(prefer_beta: bool) -> Result<CatalogBundle> 
     let index = fetch_json::<PluginCatalogIndex>(&client, DEFAULT_CATALOG_URL)
         .await
         .context("Failed to load the remote plugin catalog index")?;
+    let total_entries = index.plugins.len();
+    if let Some(progress) = progress {
+        progress.update(
+            Some(progress_span.0),
+            "Loading plugin releases",
+            Some(format!("0 of {total_entries} plugin entries loaded")),
+        );
+    }
 
     let mut entries = Vec::new();
     let mut manifests = HashMap::new();
     let mut beta_plugins = HashSet::new();
     let mut release_channels = HashMap::new();
-    for entry in &index.plugins {
+    for (index, entry) in index.plugins.iter().enumerate() {
         if let Some((manifest, beta_release)) =
             load_manifest_for_entry(&client, entry, prefer_beta).await?
         {
@@ -651,6 +753,16 @@ async fn load_public_catalog_bundle(prefer_beta: bool) -> Result<CatalogBundle> 
             );
             manifests.insert(entry.plugin_id.clone(), manifest);
             entries.push(entry.clone());
+        }
+        if let Some(progress) = progress {
+            let fraction = (index + 1) as f64 / total_entries.max(1) as f64;
+            let percent = progress_span.0 as f64
+                + progress_span.1.saturating_sub(progress_span.0) as f64 * fraction;
+            progress.update(
+                Some(percent.round() as u8),
+                "Loading plugin releases",
+                Some(format!("{} of {total_entries} plugin entries loaded", index + 1)),
+            );
         }
     }
 
@@ -1272,6 +1384,14 @@ mod tests {
                 .channel,
             "stable"
         );
+    }
+
+    #[test]
+    fn minimum_manager_version_accepts_supported_and_rejects_newer_or_invalid_requirements() {
+        assert!(ensure_version_compatible("0.1.33", "0.1.0").is_ok());
+        assert!(ensure_version_compatible("0.1.33", "0.1.33").is_ok());
+        assert!(ensure_version_compatible("0.1.33", "0.1.34").is_err());
+        assert!(ensure_version_compatible("0.1.33", "not-a-version").is_err());
     }
 
     #[test]

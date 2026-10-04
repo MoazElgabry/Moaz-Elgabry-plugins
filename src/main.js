@@ -88,6 +88,7 @@ const elements = {
   updateButton: document.querySelector("#check-updates-button"),
   supportButton: document.querySelector("#support-button"),
   pluginList: document.querySelector("#plugin-list"),
+  activityProgress: document.querySelector("#activity-progress"),
   activityLog: document.querySelector("#activity-log"),
   alertBanner: document.querySelector("#alert-banner"),
   alertLabel: document.querySelector("#alert-banner .alert-label"),
@@ -436,36 +437,25 @@ function operationSteps(kind) {
 function startOperation(kind, pluginId = null, label = "Working") {
   const steps = operationSteps(kind);
   state.activeOperation = {
+    operationId: crypto.randomUUID(),
     kind,
     pluginId,
     label,
     steps,
-    stepIndex: 0
+    stepIndex: 0,
+    percent: kind === "plugin-logs" ? null : 0,
+    detail: null
   };
-
-  if (kind !== "plugin-logs") {
-    state.activeOperation.timer = window.setInterval(() => {
-      if (!state.activeOperation || state.activeOperation.kind !== kind || state.activeOperation.pluginId !== pluginId) {
-        return;
-      }
-      const lastStep = state.activeOperation.steps.length - 1;
-      state.activeOperation.stepIndex = Math.min(state.activeOperation.stepIndex + 1, lastStep);
-      renderPlugins();
-    }, 1400);
-  }
 
   renderPlugins();
 }
 
 function finishOperation() {
-  if (state.activeOperation?.timer) {
-    window.clearInterval(state.activeOperation.timer);
-  }
   state.activeOperation = null;
   renderPlugins();
 }
 
-function updateOperationProgress({ label, steps, stepIndex = 0 } = {}) {
+function updateOperationProgress({ label, steps, stepIndex, percent, detail } = {}) {
   if (!state.activeOperation) {
     return;
   }
@@ -476,8 +466,25 @@ function updateOperationProgress({ label, steps, stepIndex = 0 } = {}) {
   if (steps) {
     state.activeOperation.steps = steps;
   }
-  state.activeOperation.stepIndex = Math.max(0, Math.min(stepIndex, state.activeOperation.steps.length - 1));
-  renderPlugins();
+  if (Number.isInteger(stepIndex)) {
+    state.activeOperation.stepIndex = Math.max(0, Math.min(stepIndex, state.activeOperation.steps.length - 1));
+    if (state.activeOperation.kind === "plugin-logs") {
+      state.activeOperation.percent = null;
+    } else if (!Number.isFinite(percent)) {
+      state.activeOperation.percent = Math.round(
+        (state.activeOperation.stepIndex / Math.max(state.activeOperation.steps.length, 1)) * 90
+      );
+    }
+  }
+  if (percent === null) {
+    state.activeOperation.percent = null;
+  } else if (Number.isFinite(percent)) {
+    state.activeOperation.percent = Math.max(0, Math.min(100, Math.round(percent)));
+  }
+  if (detail !== undefined) {
+    state.activeOperation.detail = detail;
+  }
+  renderActiveOperationProgress();
 }
 
 function parseUiError(error, fallbackSummary = "The operation failed.") {
@@ -530,6 +537,18 @@ function showAlert(errorLike, fallbackSummary) {
   elements.alertBanner.classList.toggle("is-info", payload.type === "info");
   elements.alertBanner.classList.remove("hidden");
   syncAlertLayer();
+}
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes < 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let amount = bytes;
+  let unit = 0;
+  while (amount >= 1024 && unit < units.length - 1) {
+    amount /= 1024;
+    unit += 1;
+  }
+  return unit === 0 ? `${Math.round(amount)} ${units[unit]}` : `${amount.toFixed(1)} ${units[unit]}`;
 }
 
 function hideAlert() {
@@ -860,18 +879,54 @@ function pluginOperationMarkup(plugin) {
   if (!operation || operation.pluginId !== plugin.pluginId) return "";
 
   const step = operation.steps[operation.stepIndex] ?? operation.label;
-  const showStep = step && step !== operation.label;
+  const stage = !operation.detail && step && step !== operation.label
+    ? `${step} · Step ${operation.stepIndex + 1} of ${operation.steps.length}`
+    : "";
+  return operationProgressMarkup(operation, stage);
+}
+
+function operationProgressMarkup(operation, stage = "") {
+  const percent = Number.isFinite(operation.percent) ? operation.percent : null;
+  const detail = [stage, operation.detail].filter(Boolean).join(" · ");
+  const showBar = percent !== null;
   return `
     <div class="plugin-progress" role="status" aria-live="polite">
       <div class="plugin-progress-copy">
-        <p class="plugin-progress-label">${operation.label}</p>
-        ${showStep ? `<p class="plugin-progress-step">${step}</p>` : ""}
+        <p class="plugin-progress-label">${escapeHtml(operation.label)}</p>
+        ${percent !== null ? `<strong class="plugin-progress-percent">${percent}%</strong>` : ""}
       </div>
-      <div class="plugin-progress-bar" aria-hidden="true">
-        <span class="plugin-progress-fill"></span>
-      </div>
+      ${detail ? `<p class="plugin-progress-step">${escapeHtml(detail)}</p>` : ""}
+      ${showBar ? `
+        <div class="plugin-progress-bar" role="progressbar" aria-label="${escapeHtml(operation.label)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}">
+          <span class="plugin-progress-fill" style="width: ${percent}%"></span>
+        </div>
+      ` : ""}
     </div>
   `;
+}
+
+function renderActivityOperationProgress() {
+  const operation = state.activeOperation;
+  const show = operation && ["catalog", "manager-update"].includes(operation.kind);
+  elements.activityProgress?.classList.toggle("hidden", !show);
+  if (show && elements.activityProgress) {
+    elements.activityProgress.innerHTML = operationProgressMarkup(operation);
+  } else if (elements.activityProgress) {
+    elements.activityProgress.innerHTML = "";
+  }
+}
+
+function renderActiveOperationProgress() {
+  renderActivityOperationProgress();
+  const operation = state.activeOperation;
+  if (!operation?.pluginId) return;
+  const card = [...elements.pluginList.querySelectorAll(".plugin-card")]
+    .find((item) => item.dataset.pluginCardId === operation.pluginId);
+  const host = card?.querySelector(".plugin-operation-progress-host");
+  const plugin = state.dashboard?.plugins?.find((item) => item.pluginId === operation.pluginId);
+  if (host && plugin) {
+    host.innerHTML = pluginOperationMarkup(plugin);
+  }
 }
 
 function uninstallButtonLabel(plugin) {
@@ -1073,6 +1128,7 @@ function renderVersionDrawer(plugin) {
 }
 
 function renderPlugins() {
+  renderActivityOperationProgress();
   const plugins = state.dashboard?.plugins ?? [];
 
   if (!plugins.length) {
@@ -1085,6 +1141,7 @@ function renderPlugins() {
   for (const plugin of plugins) {
     const card = document.createElement("article");
     card.className = `plugin-card ${cardToneClass(plugin)}`;
+    card.dataset.pluginCardId = plugin.pluginId;
     const installedVersion = plugin.installedVersion ?? (plugin.installed ? "Unknown" : "Not installed");
     const managedBadge = plugin.managedInstall ? "Managed install" : "Detected install";
     const primaryLabel = actionLabel(plugin);
@@ -1133,7 +1190,7 @@ function renderPlugins() {
         </div>
       </div>
       ${pluginAccessMarkup(plugin)}
-      ${pluginOperationMarkup(plugin)}
+      <div class="plugin-operation-progress-host">${pluginOperationMarkup(plugin)}</div>
     `;
 
     const button = card.querySelector(`[data-action="${primaryRequest}"]`);
@@ -1299,7 +1356,21 @@ async function activateDevelopmentReceiptsForCatalog() {
     .filter((plugin) =>
       plugin.accessMode === "licensed" && plugin.releaseChannel === "dev")
     .filter((plugin) => Boolean(plugin.pluginId));
+  const isCatalogRefresh = state.activeOperation?.kind === "catalog";
+  const invitationConnected = Boolean(state.dashboard?.manager?.developmentInvitationConnected);
+  const totalChecks = plugins.length * (invitationConnected ? 2 : 1);
+  let completedChecks = 0;
+  const reportAccessProgress = (pluginName, stage) => {
+    if (!isCatalogRefresh) return;
+    const fraction = totalChecks > 0 ? completedChecks / totalChecks : 1;
+    updateOperationProgress({
+      label: "Checking development access",
+      percent: 92 + fraction * 6,
+      detail: pluginName ? `${stage}: ${pluginName}` : "No development receipts need checking"
+    });
+  };
   for (const plugin of plugins) {
+    reportAccessProgress(plugin.displayName, "Checking receipt status");
     try {
       plugin.developmentReceiptStatus = await invoke("development_receipt_status", {
         productSlug: plugin.pluginId
@@ -1310,6 +1381,8 @@ async function activateDevelopmentReceiptsForCatalog() {
     if (plugin.developmentReceiptStatus !== "active") {
       activatedDevelopmentProducts.delete(plugin.pluginId);
     }
+    completedChecks += 1;
+    reportAccessProgress(plugin.displayName, "Receipt status checked");
   }
   const products = plugins.map((plugin) => plugin.pluginId);
   const availableProducts = new Set(products);
@@ -1318,23 +1391,32 @@ async function activateDevelopmentReceiptsForCatalog() {
       activatedDevelopmentProducts.delete(productSlug);
     }
   }
-  if (!state.dashboard?.manager?.developmentInvitationConnected) {
+  if (!invitationConnected) {
     activatedDevelopmentProducts.clear();
+    reportAccessProgress(null, "No connected invitation");
     return;
   }
   for (const productSlug of products) {
-    if (activatedDevelopmentProducts.has(productSlug)) continue;
+    const plugin = plugins.find((item) => item.pluginId === productSlug);
+    if (activatedDevelopmentProducts.has(productSlug)) {
+      completedChecks += 1;
+      reportAccessProgress(plugin?.displayName, "Receipt already active");
+      continue;
+    }
+    reportAccessProgress(plugin?.displayName, "Refreshing receipt");
     try {
       await invoke("activate_development_access", { productSlug });
       activatedDevelopmentProducts.add(productSlug);
-      const plugin = plugins.find((item) => item.pluginId === productSlug);
       if (plugin) plugin.developmentReceiptStatus = "active";
       logActivity(`Development receipt activated for ${productSlug}.`);
     } catch (error) {
       const parsed = parseUiError(error, `Development receipt is unavailable for ${productSlug}.`);
       logActivity(`Development receipt unavailable for ${productSlug}: ${parsed.summary}`);
     }
+    completedChecks += 1;
+    reportAccessProgress(plugin?.displayName, "Receipt check complete");
   }
+  reportAccessProgress(null, "Development access refreshed");
 }
 
 async function connectDevelopmentInvitation() {
@@ -1848,11 +1930,17 @@ async function refreshLicenseAccess() {
 
 async function refreshDashboard() {
   startOperation("catalog", null, "Refreshing plugin catalog");
+  const operationId = state.activeOperation.operationId;
   setBusy(true);
   try {
     hideAlert();
-    state.dashboard = await invoke("dashboard_state");
+    state.dashboard = await invoke("dashboard_state", { operationId });
     await activateDevelopmentReceiptsForCatalog();
+    updateOperationProgress({
+      label: "Refreshing access status",
+      percent: 99,
+      detail: "Checking saved product access"
+    });
     try {
       state.access = await invoke("access_state");
     } catch (error) {
@@ -1860,6 +1948,7 @@ async function refreshDashboard() {
       logActivity(`License access status is unavailable: ${parseUiError(error, "License access is unavailable.").summary}`);
     }
     renderDashboard();
+    updateOperationProgress({ label: "Catalog refresh complete", percent: 100, detail: "All available plugin entries are loaded" });
     logActivity("Plugin catalog refreshed.");
   } catch (error) {
     const parsed = parseUiError(error, "Couldn't refresh the plugin catalog right now.");
@@ -1888,15 +1977,64 @@ async function runManagerUpdateCheck({ silent = false } = {}) {
   }
 
   try {
+    updateOperationProgress({
+      label: "Checking for manager updates",
+      percent: 2,
+      detail: "Connecting to the update service"
+    });
     const update = await check(managerUpdateCheckOptions());
     if (!update) {
+      updateOperationProgress({
+        label: "Manager is up to date",
+        percent: 100,
+        detail: "No download is needed"
+      });
       return { updated: false, error: null, skipped: false };
     }
 
     if (!silent) {
       logActivity(`Downloading manager update ${update.version}.`);
     }
-    await update.downloadAndInstall();
+    let totalBytes = null;
+    let downloadedBytes = 0;
+    updateOperationProgress({
+      label: `Downloading manager update ${update.version}`,
+      percent: 4,
+      detail: "Preparing download"
+    });
+    await update.downloadAndInstall((event) => {
+      if (event.event === "Started") {
+        totalBytes = Number.isFinite(event.data.contentLength) ? event.data.contentLength : null;
+        downloadedBytes = 0;
+        updateOperationProgress({
+          label: `Downloading manager update ${update.version}`,
+          percent: totalBytes ? 5 : null,
+          detail: totalBytes
+            ? `0 B of ${formatBytes(totalBytes)} downloaded · ${formatBytes(totalBytes)} remaining`
+            : "Download started · total size unavailable"
+        });
+      } else if (event.event === "Progress") {
+        downloadedBytes += event.data.chunkLength;
+        const percent = totalBytes
+          ? 5 + (downloadedBytes / totalBytes) * 84
+          : null;
+        const downloaded = totalBytes ? Math.min(downloadedBytes, totalBytes) : downloadedBytes;
+        updateOperationProgress({
+          label: `Downloading manager update ${update.version}`,
+          percent,
+          detail: totalBytes
+            ? `${formatBytes(downloaded)} of ${formatBytes(totalBytes)} downloaded · ${formatBytes(Math.max(totalBytes - downloaded, 0))} remaining`
+            : `${formatBytes(downloadedBytes)} downloaded · total size unavailable`
+        });
+      } else if (event.event === "Finished") {
+        updateOperationProgress({
+          label: "Installing manager update",
+          percent: 94,
+          detail: "Download complete · applying update"
+        });
+      }
+    });
+    updateOperationProgress({ label: "Manager update installed", percent: 100, detail: "Restarting the manager" });
     if (!silent) {
       logActivity("Manager update installed. Restarting...");
     }
@@ -1943,7 +2081,12 @@ async function applyPluginAction(pluginId, action, targetVersion = null) {
       });
     }
 
-    const result = await invoke("apply_plugin_action", { pluginId, action, targetVersion });
+    const result = await invoke("apply_plugin_action", {
+      pluginId,
+      action,
+      targetVersion,
+      operationId: state.activeOperation?.operationId
+    });
     logActivity(`${result.pluginId}: ${result.message}`);
     await refreshDashboard();
     if (deferredManagerUpdateError) {
@@ -2121,6 +2264,16 @@ elements.releaseHighlightsDialog.addEventListener("click", (event) => {
   if (event.target === elements.releaseHighlightsDialog) {
     closeReleaseHighlightsDialog();
   }
+});
+
+listen("operation-progress", (event) => {
+  const progress = event.payload;
+  if (!progress || state.activeOperation?.operationId !== progress.operationId) {
+    return;
+  }
+  updateOperationProgress(progress);
+}).catch((error) => {
+  logActivity(`Operation progress updates unavailable: ${String(error)}`);
 });
 
 listen("plugin-log-export-progress", (event) => {

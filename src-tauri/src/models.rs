@@ -173,7 +173,6 @@ impl DiagnosticsLogSource {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginCatalogIndex {
-    pub generated_at: String,
     pub plugins: Vec<CatalogEntry>,
 }
 
@@ -287,7 +286,6 @@ pub struct InstallRecord {
 pub struct ResolvedPlugin {
     pub manifest: PluginManifest,
     pub version: String,
-    pub release_notes_url: String,
     pub package: PlatformPackage,
 }
 

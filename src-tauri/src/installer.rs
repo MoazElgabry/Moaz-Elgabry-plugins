@@ -3,6 +3,7 @@ use crate::models::{
     BundleInstallStamp, InstallRecord, ManagedInstallState, PlatformPackage, PluginDiagnostics,
     PluginOperationResult,
 };
+use crate::operation_progress::OperationProgressReporter;
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::Utc;
 use flate2::read::GzDecoder;
@@ -130,15 +131,24 @@ fn install_state_path() -> Result<PathBuf> {
 }
 
 pub async fn apply_plugin_action(
+    app: &AppHandle,
     plugin_id: &str,
     action: &str,
     target_version: Option<&str>,
+    operation_id: &str,
 ) -> Result<PluginOperationResult> {
+    let progress = OperationProgressReporter::new(
+        app.clone(),
+        operation_id,
+        Some(plugin_id.to_string()),
+    );
+    progress.update(Some(1), "Preparing plugin operation", None);
     if action == "uninstall" || action == "force-uninstall" {
-        return uninstall_plugin(plugin_id, action).await;
+        return uninstall_plugin(plugin_id, action, &progress).await;
     }
 
-    let resolved = catalog::resolve_plugin(plugin_id, target_version).await?;
+    let resolved = catalog::resolve_plugin(plugin_id, target_version, Some(&progress), (2, 10)).await?;
+    progress.update(Some(10), "Preparing package", None);
     ensure_supported_package(&resolved.package)?;
     ensure_hosts_closed(&resolved.package.host_processes)?;
     let source_spec = parse_package_source_spec(&resolved.package.download_url);
@@ -150,6 +160,7 @@ pub async fn apply_plugin_action(
         .with_context(|| format!("Failed to create {}", stage_root.display()))?;
 
     let staged_bundles = if resolved.package.package_type == "bundle-dir" {
+        progress.update(Some(68), "Validating local plugin bundle", None);
         if bundle_specs.len() != 1 {
             bail!("A bundle-directory package cannot provide multiple OFX bundles");
         }
@@ -165,10 +176,12 @@ pub async fn apply_plugin_action(
         stage_bundle_directory(&local_bundle, &staged)?;
         vec![(spec.clone(), staged)]
     } else {
-        let bytes = load_package_bytes(&resolved.package, &source_spec.source).await?;
+        let bytes = load_package_bytes(&resolved.package, &source_spec.source, &progress).await?;
+        progress.update(Some(72), "Verifying package checksum", None);
         verify_archive_hash(&bytes, &resolved.package.sha256)?;
 
         let extracted_root = staging_root.path().join("extract");
+        progress.update(Some(76), "Extracting plugin package", None);
         if resolved.package.package_type == "tar.gz" {
             extract_tar_gz(&bytes, &extracted_root)?;
         } else {
@@ -176,7 +189,8 @@ pub async fn apply_plugin_action(
         }
         let extracted_bundles = find_bundle_roots(&extracted_root, &bundle_specs)?;
         let mut staged = Vec::with_capacity(bundle_specs.len());
-        for (spec, extracted_bundle) in extracted_bundles {
+        let total_bundles = extracted_bundles.len();
+        for (index, (spec, extracted_bundle)) in extracted_bundles.into_iter().enumerate() {
             verify_bundle(
                 &extracted_bundle,
                 &resolved.package,
@@ -192,6 +206,12 @@ pub async fn apply_plugin_action(
                 )
             })?;
             staged.push((spec, staged_bundle));
+            let fraction = (index + 1) as f64 / total_bundles.max(1) as f64;
+            progress.update(
+                Some((78.0 + 7.0 * fraction).round() as u8),
+                "Validating plugin bundles",
+                Some(format!("{} of {total_bundles} bundles validated", index + 1)),
+            );
         }
         staged
     };
@@ -211,12 +231,18 @@ pub async fn apply_plugin_action(
         .iter()
         .map(|(spec, _)| spec.bundle_name.clone())
         .collect::<Vec<_>>();
+    progress.update(
+        Some(88),
+        "Installing plugin bundles",
+        Some(format!("Installing {} bundle(s); administrator approval may be required", bundle_names.len())),
+    );
     privileged_install_bundle_set(
         &stage_root,
         &install_root,
         &bundle_names,
         source_spec.simulate_fail_after_backup,
     )?;
+    progress.update(Some(98), "Saving install status", None);
 
     let mut state = load_install_state().unwrap_or_default();
     for (spec, _) in &staged_bundles {
@@ -233,6 +259,7 @@ pub async fn apply_plugin_action(
         );
     }
     save_install_state(&state)?;
+    progress.update(Some(100), "Plugin installation complete", None);
 
     Ok(PluginOperationResult {
         plugin_id: plugin_id.to_string(),
@@ -247,8 +274,12 @@ pub async fn apply_plugin_action(
     })
 }
 
-async fn uninstall_plugin(plugin_id: &str, action: &str) -> Result<PluginOperationResult> {
-    let resolved = catalog::resolve_plugin(plugin_id, None).await?;
+async fn uninstall_plugin(
+    plugin_id: &str,
+    action: &str,
+    progress: &OperationProgressReporter,
+) -> Result<PluginOperationResult> {
+    let resolved = catalog::resolve_plugin(plugin_id, None, Some(progress), (2, 12)).await?;
     ensure_hosts_closed(&resolved.package.host_processes)?;
 
     let install_root = PathBuf::from(&resolved.package.install_path);
@@ -282,13 +313,20 @@ async fn uninstall_plugin(plugin_id: &str, action: &str) -> Result<PluginOperati
         .map(|(spec, _, _, _, _)| spec.bundle_name.clone())
         .collect::<Vec<_>>();
     if bundle_exists {
+        progress.update(
+            Some(78),
+            "Removing installed bundles",
+            Some(format!("Removing {} bundle(s); waiting for system permission if needed", bundle_names.len())),
+        );
         privileged_uninstall_bundle_set(&install_root, &bundle_names)?;
     }
 
+    progress.update(Some(94), "Cleaning manager install records", None);
     for (_, _, key, _, _) in bundles {
         state.installs.remove(&key);
     }
     save_install_state(&state)?;
+    progress.update(Some(100), "Plugin removal complete", None);
 
     let message = if bundle_exists {
         format!(
@@ -317,7 +355,7 @@ pub async fn export_plugin_logs(
     destination_dir: &str,
     remove_previous_logs: bool,
 ) -> Result<PluginOperationResult> {
-    let resolved = catalog::resolve_plugin(plugin_id, None).await?;
+    let resolved = catalog::resolve_plugin(plugin_id, None, None, (0, 100)).await?;
     let diagnostics = resolved
         .manifest
         .diagnostics
@@ -391,7 +429,7 @@ pub async fn export_plugin_logs(
 }
 
 pub async fn check_plugin_log_export_ready(plugin_id: &str) -> Result<()> {
-    let resolved = catalog::resolve_plugin(plugin_id, None).await?;
+    let resolved = catalog::resolve_plugin(plugin_id, None, None, (0, 100)).await?;
     let diagnostics = resolved
         .manifest
         .diagnostics
@@ -1030,11 +1068,16 @@ fn write_bundle_install_stamp(
     fs::write(&stamp_path, raw).with_context(|| format!("Failed to write {}", stamp_path.display()))
 }
 
-async fn load_package_bytes(package: &PlatformPackage, source: &str) -> Result<Vec<u8>> {
+async fn load_package_bytes(
+    package: &PlatformPackage,
+    source: &str,
+    progress: &OperationProgressReporter,
+) -> Result<Vec<u8>> {
     if let Some(artifact_id) = package.protected_artifact_id {
-        return crate::development::download_protected_artifact(artifact_id).await;
+        return crate::development::download_protected_artifact(artifact_id, progress).await;
     }
     if let Ok(local_path) = resolve_local_source_path(source) {
+        progress.update(Some(70), "Reading local plugin package", None);
         return fs::read(&local_path)
             .with_context(|| format!("Failed to read {}", local_path.display()));
     }
@@ -1043,17 +1086,17 @@ async fn load_package_bytes(package: &PlatformPackage, source: &str) -> Result<V
         .user_agent("MoazElgabryPlugins/0.1.0")
         .build()
         .context("Failed to create download client")?;
-    let bytes = client
+    let response = client
         .get(source)
         .send()
         .await
         .with_context(|| format!("Failed to download {source}"))?
         .error_for_status()
-        .with_context(|| format!("Unexpected response while downloading {source}"))?
-        .bytes()
+        .with_context(|| format!("Unexpected response while downloading {source}"))?;
+    progress
+        .download_response(response, 12, 70, "Downloading plugin package")
         .await
-        .context("Failed to read downloaded plugin archive")?;
-    Ok(bytes.to_vec())
+        .context("Failed to read downloaded plugin archive")
 }
 
 fn ensure_hosts_closed(host_processes: &[String]) -> Result<()> {
@@ -1181,10 +1224,10 @@ fn should_skip_zip_entry(path: &Path) -> bool {
     })
 }
 
-fn validate_zip_entry_path(path: &Path) -> Result<()> {
+fn validate_zip_entry_path(_path: &Path) -> Result<()> {
     #[cfg(target_os = "windows")]
     {
-        for component in path.components() {
+        for component in _path.components() {
             let name = component.as_os_str().to_string_lossy();
             if name.is_empty() {
                 continue;

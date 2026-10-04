@@ -4,6 +4,7 @@ src-tauri/target/
 src-tauri/gen/
 .cargo-target*/
 /.codex-manager-ui-target/
+/.codex-devtest/
 tauri.local-build.conf.json
 *.local.conf.json
 .env

@@ -4,6 +4,7 @@ mod credentials;
 mod development;
 mod installer;
 mod models;
+mod operation_progress;
 mod settings;
 
 use std::process::Command;
@@ -17,8 +18,11 @@ const MIN_WINDOW_HEIGHT: u32 = 760;
 const STARTUP_WINDOW_MARGIN: i32 = 24;
 
 #[tauri::command]
-async fn dashboard_state() -> Result<models::DashboardState, String> {
-    catalog::build_dashboard_state()
+async fn dashboard_state(app: AppHandle, operation_id: Option<String>) -> Result<models::DashboardState, String> {
+    let progress = operation_id.map(|operation_id| {
+        operation_progress::OperationProgressReporter::new(app, operation_id, None)
+    });
+    catalog::build_dashboard_state(progress)
         .await
         .map_err(|error| models::UiError::from_error("dashboard", &error).to_json_string())
 }
@@ -73,11 +77,13 @@ async fn deactivate_access(
 
 #[tauri::command]
 async fn apply_plugin_action(
+    app: AppHandle,
     plugin_id: String,
     action: String,
     target_version: Option<String>,
+    operation_id: String,
 ) -> Result<models::PluginOperationResult, String> {
-    installer::apply_plugin_action(&plugin_id, &action, target_version.as_deref())
+    installer::apply_plugin_action(&app, &plugin_id, &action, target_version.as_deref(), &operation_id)
         .await
         .map_err(|error| models::UiError::from_error("plugin_action", &error).to_json_string())
 }

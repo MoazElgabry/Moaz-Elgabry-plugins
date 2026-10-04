@@ -26,7 +26,6 @@ use uuid::Uuid;
 
 pub const ACCESS_API_BASE: &str = "https://moazelgabry.com/wp-json/moaz-releases/v1";
 pub const HYOGEN_DEV_BUNDLE_IDENTIFIER: &str = "com.moazelgabry.hyogen.dev";
-pub const HYOGEN_MODULES_BUNDLE_IDENTIFIER: &str = "com.moazelgabry.hyogen.modules";
 const HYOGEN_PRODUCT_SLUG: &str = "hyogen";
 
 pub const HYOGEN_ACCESS_PUBLIC_KEY_BASE64URL: &str =
