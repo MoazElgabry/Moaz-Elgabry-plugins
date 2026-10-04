@@ -12,15 +12,6 @@ pub struct AppSettings {
     pub development_builds_enabled: bool,
 }
 
-impl AppSettings {
-    pub fn normalized(mut self) -> Self {
-        if self.development_builds_enabled {
-            self.beta_releases_enabled = true;
-        }
-        self
-    }
-}
-
 pub fn load_settings() -> Result<AppSettings> {
     let path = settings_path()?;
     if !path.exists() {
@@ -31,7 +22,7 @@ pub fn load_settings() -> Result<AppSettings> {
         fs::read_to_string(&path).with_context(|| format!("Failed to read {}", path.display()))?;
     let settings: AppSettings =
         serde_json::from_str(&raw).context("Failed to parse settings JSON")?;
-    Ok(settings.normalized())
+    Ok(settings)
 }
 
 pub fn save_settings(settings: &AppSettings) -> Result<()> {
@@ -40,7 +31,7 @@ pub fn save_settings(settings: &AppSettings) -> Result<()> {
         fs::create_dir_all(parent)
             .with_context(|| format!("Failed to create {}", parent.display()))?;
     }
-    let raw = serde_json::to_string_pretty(&settings.clone().normalized())?;
+    let raw = serde_json::to_string_pretty(settings)?;
     fs::write(&path, raw).with_context(|| format!("Failed to write {}", path.display()))
 }
 
@@ -49,15 +40,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn development_builds_force_beta_on() {
+    fn beta_and_development_preferences_are_independent() {
         let settings = AppSettings {
             beta_releases_enabled: false,
             development_builds_enabled: true,
-        }
-        .normalized();
+        };
+        let serialized = serde_json::to_string(&settings).unwrap();
+        let restored: AppSettings = serde_json::from_str(&serialized).unwrap();
 
-        assert!(settings.beta_releases_enabled);
-        assert!(settings.development_builds_enabled);
+        assert!(!restored.beta_releases_enabled);
+        assert!(restored.development_builds_enabled);
     }
 
     #[test]

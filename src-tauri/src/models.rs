@@ -13,6 +13,87 @@ pub struct DashboardState {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DevelopmentAccessStatus {
+    pub product_slug: String,
+    pub status: String,
+    pub device_id: String,
+    pub expires_at: Option<i64>,
+    pub development_bundle: Option<String>,
+    pub development_bundles: Vec<String>,
+    pub grants: Vec<String>,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccessState {
+    pub device_id: String,
+    pub products: Vec<AccessProductStatus>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccessProductStatus {
+    pub product_slug: String,
+    pub status: String,
+    pub expires_at: Option<i64>,
+    pub licenses: Vec<LicenseSourceStatus>,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LicenseSourceStatus {
+    pub license_id: String,
+    pub email: Option<String>,
+    pub status: String,
+    pub expires_at: Option<i64>,
+    pub key_available: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccessProductResult {
+    pub product_slug: String,
+    pub status: String,
+    pub expires_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccessOperationResult {
+    pub license_id: String,
+    pub products: Vec<AccessProductResult>,
+    pub state: AccessState,
+}
+
+/// Catalog access is explicit. Missing or unknown values remain unknown so a
+/// future product cannot accidentally inherit paid controls.
+pub fn normalize_access_mode(access_mode: Option<&str>) -> String {
+    match access_mode.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
+        Some("free") => "free".to_string(),
+        Some("licensed") | Some("watermarked_license") => "licensed".to_string(),
+        _ => "unknown".to_string(),
+    }
+}
+
+/// Use catalog metadata when available and conservative product defaults for
+/// existing feeds that predate the explicit access-mode field.
+pub fn catalog_access_mode(product_slug: &str, access_mode: Option<&str>) -> String {
+    let configured = normalize_access_mode(access_mode);
+    if configured != "unknown" {
+        return configured;
+    }
+
+    match product_slug {
+        "chromaspace" | "lensdiff" | "me-opendrt" => "free".to_string(),
+        "hyogen" => "licensed".to_string(),
+        _ => "unknown".to_string(),
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ManagerSummary {
     pub app_version: String,
     pub platform: String,
@@ -22,6 +103,7 @@ pub struct ManagerSummary {
     pub beta_releases_enabled: bool,
     pub development_builds_enabled: bool,
     pub development_invitation_connected: bool,
+    pub development_invitation_has_access: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -40,6 +122,9 @@ pub struct PluginStatus {
     pub managed_install: bool,
     pub needs_update: bool,
     pub channel_switch_available: bool,
+    #[serde(default)]
+    pub access_mode: String,
+    pub license_url: Option<String>,
     pub channel_switch_mode: Option<String>,
     pub catalog_behind_installed: bool,
     pub status: String,
@@ -61,6 +146,7 @@ pub struct PluginOperationResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginDiagnostics {
+    #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
     pub log_source_path: BTreeMap<String, DiagnosticsLogSource>,
@@ -102,6 +188,10 @@ pub struct CatalogEntry {
     #[serde(default)]
     pub beta_manifest_url: Option<String>,
     pub icon_url: Option<String>,
+    #[serde(default)]
+    pub access_mode: Option<String>,
+    #[serde(default)]
+    pub license_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -114,6 +204,10 @@ pub struct PluginManifest {
     pub release_date: String,
     pub release_notes_url: String,
     pub release_highlights: Option<String>,
+    #[serde(default)]
+    pub access_mode: Option<String>,
+    #[serde(default)]
+    pub license_url: Option<String>,
     #[serde(default)]
     pub diagnostics: Option<PluginDiagnostics>,
     pub platforms: Vec<PlatformPackage>,
@@ -157,11 +251,20 @@ pub struct PlatformPackage {
     pub package_type: String,
     pub bundle_name: String,
     pub bundle_identifier: String,
+    #[serde(default)]
+    pub additional_bundles: Vec<AdditionalBundle>,
     pub install_path: String,
     pub min_manager_version: String,
     pub host_processes: Vec<String>,
     #[serde(default)]
     pub protected_artifact_id: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdditionalBundle {
+    pub bundle_name: String,
+    pub bundle_identifier: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -249,6 +352,22 @@ fn classify_error<'a>(
         return (
             "development_invitation_failed",
             "The development invitation could not be connected.",
+        );
+    }
+
+    if matches!(operation, "license_access" | "hyogen_license")
+        && details.contains("Receipt verification is not configured")
+    {
+        return (
+            "license_verification_unconfigured",
+            "License verification is not configured in this manager build, so activation was blocked.",
+        );
+    }
+
+    if matches!(operation, "license_access" | "hyogen_license") && details.contains("receipt") {
+        return (
+            "license_receipt_invalid",
+            "The license service returned a receipt this manager could not verify.",
         );
     }
 
@@ -446,5 +565,13 @@ mod tests {
                 "~/Library/Logs/ME_OpenDRT_CubeViewer.log".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn product_access_mode_is_conservative() {
+        assert_eq!(normalize_access_mode(Some("licensed")), "licensed");
+        assert_eq!(normalize_access_mode(Some("free")), "free");
+        assert_eq!(normalize_access_mode(Some("future-mode")), "unknown");
+        assert_eq!(normalize_access_mode(None), "unknown");
     }
 }

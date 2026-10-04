@@ -1,3 +1,4 @@
+mod access;
 mod catalog;
 mod credentials;
 mod development;
@@ -8,7 +9,7 @@ mod settings;
 use std::process::Command;
 use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, Position, Size, WebviewWindow};
 
-const SUPPORT_URL: &str = "https://buymeacoffee.com/moazelgabry";
+const SUPPORT_URL: &str = "mailto:support@moazelgabry.com";
 const INITIAL_WINDOW_WIDTH: u32 = 1180;
 const INITIAL_WINDOW_HEIGHT: u32 = 860;
 const MIN_WINDOW_WIDTH: u32 = 900;
@@ -20,6 +21,54 @@ async fn dashboard_state() -> Result<models::DashboardState, String> {
     catalog::build_dashboard_state()
         .await
         .map_err(|error| models::UiError::from_error("dashboard", &error).to_json_string())
+}
+
+#[tauri::command]
+fn access_state() -> Result<models::AccessState, String> {
+    access::status()
+        .map_err(|error| models::UiError::from_error("license_access", &error).to_json_string())
+}
+
+#[tauri::command]
+async fn activate_access(
+    key: String,
+    product_slug: String,
+) -> Result<models::AccessOperationResult, String> {
+    access::activate(key.trim(), product_slug.trim())
+        .await
+        .map_err(|error| models::UiError::from_error("license_access", &error).to_json_string())
+}
+
+#[tauri::command]
+async fn refresh_access(product_slugs: Vec<String>) -> Result<models::AccessState, String> {
+    access::refresh(&product_slugs)
+        .await
+        .map_err(|error| models::UiError::from_error("license_access", &error).to_json_string())
+}
+
+#[tauri::command]
+async fn activate_development_access(
+    product_slug: String,
+) -> Result<models::DevelopmentAccessStatus, String> {
+    access::activate_development_access(product_slug.trim())
+        .await
+        .map_err(|error| models::UiError::from_error("development_invitation", &error).to_json_string())
+}
+
+#[tauri::command]
+fn development_receipt_status(product_slug: String) -> Result<String, String> {
+    access::development_receipt_status(product_slug.trim())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn deactivate_access(
+    license_id: String,
+    product_slug: String,
+) -> Result<models::AccessState, String> {
+    access::deactivate(license_id.trim(), product_slug.trim())
+        .await
+        .map_err(|error| models::UiError::from_error("license_access", &error).to_json_string())
 }
 
 #[tauri::command]
@@ -37,7 +86,7 @@ async fn apply_plugin_action(
 async fn set_beta_releases_enabled(enabled: bool) -> Result<(), String> {
     let mut current = settings::load_settings()
         .map_err(|error| models::UiError::from_error("settings", &error).to_json_string())?;
-    current.beta_releases_enabled = enabled || current.development_builds_enabled;
+    current.beta_releases_enabled = enabled;
     settings::save_settings(&current)
         .map_err(|error| models::UiError::from_error("settings", &error).to_json_string())
 }
@@ -47,30 +96,52 @@ async fn set_development_builds_enabled(enabled: bool) -> Result<(), String> {
     let mut current = settings::load_settings()
         .map_err(|error| models::UiError::from_error("settings", &error).to_json_string())?;
     current.development_builds_enabled = enabled;
-    if enabled {
-        current.beta_releases_enabled = true;
-    }
     settings::save_settings(&current)
         .map_err(|error| models::UiError::from_error("settings", &error).to_json_string())
 }
 
 #[tauri::command]
-async fn connect_development_invitation(token: String) -> Result<(), String> {
-    crate::development::validate_token_and_catalog(&token)
+async fn connect_development_invitation(token: String) -> Result<Option<String>, String> {
+    let catalog = crate::development::validate_token_and_catalog(&token)
         .await
         .map_err(|error| {
             models::UiError::from_error("development_invitation", &error).to_json_string()
         })?;
+    crate::access::forget_development_receipts().map_err(|error| {
+        models::UiError::from_error("development_invitation", &error).to_json_string()
+    })?;
     crate::credentials::store_invitation_token(&token).map_err(|error| {
+        models::UiError::from_error("development_invitation", &error).to_json_string()
+    })?;
+    Ok(catalog.email)
+}
+
+#[tauri::command]
+async fn forget_development_invitation() -> Result<(), String> {
+    crate::access::forget_development_receipts().map_err(|error| {
+        models::UiError::from_error("development_invitation", &error).to_json_string()
+    })?;
+    crate::credentials::forget_invitation_token().map_err(|error| {
         models::UiError::from_error("development_invitation", &error).to_json_string()
     })
 }
 
 #[tauri::command]
-async fn forget_development_invitation() -> Result<(), String> {
-    crate::credentials::forget_invitation_token().map_err(|error| {
-        models::UiError::from_error("development_invitation", &error).to_json_string()
-    })
+fn invitation_request_receipt() -> Result<Option<String>, String> {
+    crate::credentials::invitation_request_receipt()
+        .map_err(|error| models::UiError::from_error("invitation_request", &error).to_json_string())
+}
+
+#[tauri::command]
+fn store_invitation_request_receipt(receipt: String) -> Result<(), String> {
+    crate::credentials::store_invitation_request_receipt(&receipt)
+        .map_err(|error| models::UiError::from_error("invitation_request", &error).to_json_string())
+}
+
+#[tauri::command]
+fn forget_invitation_request_receipt() -> Result<(), String> {
+    crate::credentials::forget_invitation_request_receipt()
+        .map_err(|error| models::UiError::from_error("invitation_request", &error).to_json_string())
 }
 
 #[tauri::command]
@@ -160,6 +231,12 @@ pub fn run() {
     builder
         .invoke_handler(tauri::generate_handler![
             dashboard_state,
+            access_state,
+            activate_access,
+            refresh_access,
+            activate_development_access,
+            development_receipt_status,
+            deactivate_access,
             apply_plugin_action,
             export_plugin_logs,
             check_plugin_log_export_ready,
@@ -167,6 +244,9 @@ pub fn run() {
             set_development_builds_enabled,
             connect_development_invitation,
             forget_development_invitation,
+            invitation_request_receipt,
+            store_invitation_request_receipt,
+            forget_invitation_request_receipt,
             open_support_link
         ])
         .setup(|app| {

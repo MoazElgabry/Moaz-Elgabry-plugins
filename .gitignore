@@ -2,10 +2,14 @@ node_modules/
 dist/
 src-tauri/target/
 src-tauri/gen/
-.cargo-target/
+.cargo-target*/
+/.codex-manager-ui-target/
 tauri.local-build.conf.json
 *.local.conf.json
 .env
 .env.*
 *.log
 local-*.png
+PLUGIN_MANAGER_DEVELOPMENT_NOTES.md
+tools/copy-access-receipt-seed.ps1
+ACCESS-RECEIPT-SETUP.md

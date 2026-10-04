@@ -26,6 +26,7 @@ pub struct CatalogBundle {
     pub beta_plugins: HashSet<String>,
     pub release_channels: HashMap<String, String>,
     pub development_warning: Option<String>,
+    pub development_invitation_has_access: Option<bool>,
 }
 
 pub async fn build_dashboard_state() -> Result<DashboardState> {
@@ -43,6 +44,7 @@ pub async fn build_dashboard_state() -> Result<DashboardState> {
         development_invitation_connected: crate::credentials::invitation_token()
             .unwrap_or(None)
             .is_some(),
+        development_invitation_has_access: bundle.development_invitation_has_access,
     };
 
     let plugins = bundle
@@ -102,17 +104,44 @@ fn build_plugin_status(
     release_channel: &str,
 ) -> PluginStatus {
     let target_bundle = PathBuf::from(&package.install_path).join(&package.bundle_name);
-    let installed = target_bundle.exists();
-    let install_key = installer::install_key(&entry.plugin_id, &target_bundle);
-    let record = install_state.installs.get(&install_key);
-    let stamp = installer::read_bundle_install_stamp(&target_bundle)
-        .ok()
-        .flatten();
+    let mut managed_bundles = vec![(package.bundle_name.as_str(), target_bundle.as_path())];
+    let additional_paths = package
+        .additional_bundles
+        .iter()
+        .map(|bundle| {
+            (
+                bundle.bundle_name.as_str(),
+                PathBuf::from(&package.install_path).join(&bundle.bundle_name),
+            )
+        })
+        .collect::<Vec<_>>();
+    managed_bundles.extend(
+        additional_paths
+            .iter()
+            .map(|(name, path)| (*name, path.as_path())),
+    );
+    let installed = managed_bundles.iter().all(|(_, path)| path.is_dir());
+    let records = managed_bundles
+        .iter()
+        .map(|(_, path)| {
+            let key = installer::install_key(&entry.plugin_id, path);
+            install_state.installs.get(&key)
+        })
+        .collect::<Vec<_>>();
+    let stamps = managed_bundles
+        .iter()
+        .map(|(_, path)| installer::read_bundle_install_stamp(path).ok().flatten())
+        .collect::<Vec<_>>();
+    let record = records.first().copied().flatten();
+    let stamp = stamps.first().and_then(Option::as_ref);
     let installed_version = stamp
         .as_ref()
         .map(|item| item.installed_version.clone())
         .or_else(|| record.map(|item| item.installed_version.clone()));
-    let managed_install = stamp.is_some() || record.is_some();
+    let managed_install = records
+        .iter()
+        .zip(stamps.iter())
+        .all(|(record, stamp)| record.is_some() || stamp.is_some());
     let installed_is_prerelease = installed_version
         .as_ref()
         .map(|current| is_prerelease_like(current))
@@ -168,6 +197,11 @@ fn build_plugin_status(
         managed_install,
         needs_update,
         channel_switch_available,
+        access_mode: crate::models::catalog_access_mode(
+            &entry.plugin_id,
+            entry.access_mode.as_deref().or(manifest.access_mode.as_deref()),
+        ),
+        license_url: entry.license_url.clone().or_else(|| manifest.license_url.clone()),
         channel_switch_mode,
         catalog_behind_installed,
         status,
@@ -551,16 +585,34 @@ async fn load_catalog_bundle(app_settings: &settings::AppSettings) -> Result<Cat
     }
 
     match crate::development::catalog_from_credential().await {
-        Ok(Some(catalog)) => overlay_development_catalog(&mut bundle, catalog),
+        Ok(Some(catalog)) => {
+            bundle.development_invitation_has_access = catalog
+                .plugin_grants
+                .as_ref()
+                .map(|plugin_grants| !plugin_grants.is_empty());
+            if let Some(plugin_grants) = catalog.plugin_grants.as_deref() {
+                if let Err(error) = crate::access::retain_development_receipts(plugin_grants) {
+                    bundle.development_warning = Some(format!(
+                        "The invitation was refreshed, but local development receipts could not be synchronized: {error}"
+                    ));
+                }
+            }
+            overlay_development_catalog(&mut bundle, catalog);
+        }
         Ok(None) => {
             bundle.development_warning = Some(
-                "Connect a development invitation to load protected Hyogen builds.".to_string(),
+                "Connect a development invitation to load protected development builds."
+                    .to_string(),
             );
         }
         Err(error) => {
-            bundle.development_warning = Some(format!(
-                "Development builds could not be refreshed. Public stable and beta releases remain available. {error}"
-            ));
+            bundle.development_warning = Some(if crate::development::invitation_was_rejected(&error) {
+                format!("{error} Public stable and beta releases remain available.")
+            } else {
+                format!(
+                    "Development builds could not be refreshed. Public stable and beta releases remain available. {error}"
+                )
+            });
         }
     }
     Ok(bundle)
@@ -610,6 +662,7 @@ async fn load_public_catalog_bundle(prefer_beta: bool) -> Result<CatalogBundle> 
         beta_plugins,
         release_channels,
         development_warning: None,
+        development_invitation_has_access: None,
     })
 }
 
@@ -629,6 +682,16 @@ fn overlay_development_catalog(
         if development_releases.is_empty() {
             continue;
         }
+        let development_name = development_releases
+            .first()
+            .map(|release| release.plugin_name.clone())
+            .unwrap_or_else(|| plugin_id.clone());
+        let development_access_mode = development_releases
+            .first()
+            .and_then(|release| release.access_mode.clone());
+        let development_license_url = development_releases
+            .first()
+            .and_then(|release| release.license_url.clone());
 
         let existing = bundle.manifests.get(&plugin_id).cloned();
         let public_channel = bundle
@@ -674,7 +737,13 @@ fn overlay_development_catalog(
             }
         }
 
-        let Some(target) = candidates.into_iter().max_by(compare_channel_releases) else {
+        let target = candidates
+            .iter()
+            .filter(|candidate| candidate.channel == "dev")
+            .max_by(|left, right| version_cmp(&left.release.version, &right.release.version))
+            .cloned()
+            .or_else(|| candidates.into_iter().max_by(compare_channel_releases));
+        let Some(target) = target else {
             continue;
         };
         let mut versions: HashMap<String, ChannelRelease> = HashMap::new();
@@ -701,7 +770,7 @@ fn overlay_development_catalog(
             display_name: existing
                 .as_ref()
                 .map(|manifest| manifest.display_name.clone())
-                .unwrap_or_else(|| "Hyogen".to_string()),
+                .unwrap_or_else(|| development_name.clone()),
             icon_url: existing
                 .as_ref()
                 .and_then(|manifest| manifest.icon_url.clone()),
@@ -709,6 +778,17 @@ fn overlay_development_catalog(
             release_date: target.release.release_date.clone(),
             release_notes_url: target.release.release_notes_url.clone(),
             release_highlights: target.release.release_highlights.clone(),
+            access_mode: Some(crate::models::catalog_access_mode(
+                &plugin_id,
+                existing
+                    .as_ref()
+                    .and_then(|manifest| manifest.access_mode.as_deref())
+                    .or(development_access_mode.as_deref()),
+            )),
+            license_url: existing
+                .as_ref()
+                .and_then(|manifest| manifest.license_url.clone())
+                .or_else(|| development_license_url.clone()),
             diagnostics: target.release.diagnostics.clone(),
             platforms: target.release.platforms.clone(),
             available_versions,
@@ -721,11 +801,22 @@ fn overlay_development_catalog(
         {
             bundle.entries.push(CatalogEntry {
                 plugin_id: plugin_id.clone(),
-                display_name: "Hyogen".to_string(),
+                display_name: development_name,
                 manifest_url: String::new(),
                 stable_manifest_url: None,
                 beta_manifest_url: None,
                 icon_url: None,
+                access_mode: Some(crate::models::catalog_access_mode(
+                    &plugin_id,
+                    existing
+                        .as_ref()
+                        .and_then(|manifest| manifest.access_mode.as_deref())
+                        .or(development_access_mode.as_deref()),
+                )),
+                license_url: existing
+                    .as_ref()
+                    .and_then(|manifest| manifest.license_url.clone())
+                    .or_else(|| development_license_url.clone()),
             });
         }
         bundle.manifests.insert(plugin_id.clone(), manifest);
@@ -746,28 +837,8 @@ fn overlay_development_catalog(
 }
 
 fn compare_channel_releases(left: &ChannelRelease, right: &ChannelRelease) -> Ordering {
-    numeric_version_cmp(&left.release.version, &right.release.version)
+    version_cmp(&left.release.version, &right.release.version)
         .then_with(|| channel_priority(&right.channel).cmp(&channel_priority(&left.channel)))
-}
-
-fn numeric_version_cmp(left: &str, right: &str) -> Ordering {
-    match (parse_loose_version(left), parse_loose_version(right)) {
-        (Some(left), Some(right)) => {
-            let length = left.core.len().max(right.core.len());
-            for index in 0..length {
-                let comparison = left
-                    .core
-                    .get(index)
-                    .unwrap_or(&0)
-                    .cmp(right.core.get(index).unwrap_or(&0));
-                if comparison != Ordering::Equal {
-                    return comparison;
-                }
-            }
-            Ordering::Equal
-        }
-        _ => version_cmp(left, right),
-    }
 }
 
 fn channel_priority(channel: &str) -> u8 {
@@ -900,6 +971,7 @@ fn load_local_dev_catalog(prefer_beta: bool) -> Result<Option<CatalogBundle>> {
         beta_plugins,
         release_channels,
         development_warning: None,
+        development_invitation_has_access: None,
     }))
 }
 
@@ -1114,6 +1186,7 @@ mod tests {
             package_type: "zip".to_string(),
             bundle_name: "Example.ofx.bundle".to_string(),
             bundle_identifier: "com.example.Plugin".to_string(),
+            additional_bundles: Vec::new(),
             install_path: "C:\\Test\\Plugins".to_string(),
             min_manager_version: "0.1.0".to_string(),
             host_processes: Vec::new(),
@@ -1141,6 +1214,8 @@ mod tests {
             release_date: "2026-03-30T00:00:00Z".to_string(),
             release_notes_url: format!("https://example.com/releases/{version}"),
             release_highlights: None,
+            access_mode: None,
+            license_url: None,
             diagnostics: None,
             platforms: vec![test_package()],
             available_versions: available_versions
@@ -1158,6 +1233,8 @@ mod tests {
             stable_manifest_url: None,
             beta_manifest_url: None,
             icon_url: None,
+            access_mode: None,
+            license_url: None,
         }
     }
 
@@ -1211,10 +1288,13 @@ mod tests {
             beta_plugins: HashSet::new(),
             release_channels: HashMap::from([(entry.plugin_id.clone(), "stable".to_string())]),
             development_warning: None,
+            development_invitation_has_access: None,
         };
         overlay_development_catalog(
             &mut bundle,
             crate::development::ValidatedDevelopmentCatalog {
+                email: None,
+                plugin_grants: None,
                 releases: Vec::new(),
                 warnings: vec!["Ignored an unrecognized development grant.".to_string()],
             },
@@ -1228,6 +1308,10 @@ mod tests {
     #[test]
     fn retired_development_release_is_selectable_but_never_the_target() {
         let mut published = crate::development::ValidatedDevelopmentRelease {
+            plugin_slug: "hyogen".to_string(),
+            plugin_name: "Hyogen".to_string(),
+            access_mode: None,
+            license_url: None,
             channel: "dev".to_string(),
             state: "published".to_string(),
             keep_for_rollback: true,
@@ -1250,10 +1334,13 @@ mod tests {
             beta_plugins: HashSet::new(),
             release_channels: HashMap::new(),
             development_warning: None,
+            development_invitation_has_access: None,
         };
         overlay_development_catalog(
             &mut bundle,
             crate::development::ValidatedDevelopmentCatalog {
+                email: None,
+                plugin_grants: None,
                 releases: vec![published, retired],
                 warnings: Vec::new(),
             },

@@ -2,6 +2,7 @@ name: Build Moaz Elgabry Plugins
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  MOAZ_ER_ACCESS_PUBLIC_KEY_BASE64URL: ${{ vars.MOAZ_ER_ACCESS_PUBLIC_KEY_BASE64URL }}
 
 on:
   workflow_dispatch:
@@ -40,6 +41,19 @@ jobs:
         id: version
         run: |
           echo "app_version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Validate receipt verification key
+        run: |
+          node <<'NODE'
+          const key = process.env.MOAZ_ER_ACCESS_PUBLIC_KEY_BASE64URL || '';
+          if (!/^[A-Za-z0-9_-]{43}$/.test(key)) {
+            throw new Error('Set the MOAZ_ER_ACCESS_PUBLIC_KEY_BASE64URL Actions variable to the unpadded Base64URL Ed25519 public key.');
+          }
+          const raw = Buffer.from(key, 'base64url');
+          if (raw.length !== 32 || raw.toString('base64url') !== key) {
+            throw new Error('The receipt public key must decode to exactly 32 bytes in canonical unpadded Base64URL form.');
+          }
+          NODE
 
       - name: Guard release state for this version
         id: release_guard
@@ -177,6 +191,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          MOAZ_ER_ACCESS_PUBLIC_KEY_BASE64URL: ${{ vars.MOAZ_ER_ACCESS_PUBLIC_KEY_BASE64URL }}
         with:
           projectPath: "."
           tagName: plugin-manager-v__VERSION__

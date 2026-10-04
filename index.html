@@ -18,68 +18,80 @@
           </div>
 
           <section class="panel compact manager-panel">
-            <div class="panel-header">
+            <div class="panel-header manager-panel-header">
               <h2>Manager</h2>
+              <div id="manager-identity" class="manager-identity" role="group" aria-label="Manager version and platform">
+                <span id="manager-platform-icon" class="manager-platform-icon" aria-hidden="true"></span>
+                <span id="manager-version" class="manager-version">-</span>
+                <span id="manager-platform" class="visually-hidden">-</span>
+              </div>
             </div>
             <div class="manager-overview">
-              <dl class="manager-summary-list">
-                <div class="manager-summary-row">
-                  <dt>Version:</dt>
-                  <dd id="manager-version">-</dd>
-                </div>
-                <div class="manager-summary-row">
-                  <dt>Platform:</dt>
-                  <dd id="manager-platform">-</dd>
-                </div>
-              </dl>
               <div class="button-row manager-action-row">
                 <button id="refresh-button" class="primary">Refresh Plugin Catalog</button>
                 <button id="check-updates-button">Check for Manager Updates</button>
               </div>
             </div>
             <details class="manager-details">
-              <summary>Manager details</summary>
+              <summary>Advanced options</summary>
               <dl class="summary-grid manager-details-grid">
                 <div>
-                  <dt>Catalog</dt>
+                  <dt>Catalog:</dt>
                   <dd id="catalog-source">-</dd>
                 </div>
                 <div>
-                  <dt>Updater</dt>
+                  <dt>Updater:</dt>
                   <dd id="updater-status">-</dd>
                 </div>
               </dl>
               <label class="toggle-row" for="beta-releases-toggle">
                 <span>
-                  <strong>Enable beta releases</strong>
-                  <small>Use public beta builds when a plugin provides them.</small>
+                  <strong>Beta releases</strong>
                 </span>
                 <input id="beta-releases-toggle" type="checkbox" />
               </label>
               <label class="toggle-row" for="development-builds-toggle">
                 <span>
-                  <strong>Enable Development Builds</strong>
-                  <small>Use invitation-only Hyogen development builds. Beta releases are required.</small>
+                  <strong>Development builds</strong>
                 </span>
                 <input id="development-builds-toggle" type="checkbox" />
               </label>
-              <div class="development-access">
-                <label for="development-invitation-token">Development invitation</label>
-                <div class="development-access-row">
-                  <input
-                    id="development-invitation-token"
-                    type="password"
-                    autocomplete="off"
-                    spellcheck="false"
-                    placeholder="mer_..."
-                    aria-describedby="development-access-status"
-                  />
-                  <button id="connect-development-invitation" type="button">Connect</button>
-                  <button id="forget-development-invitation" type="button" class="subtle-button">Forget</button>
+            <section class="invitation-access" aria-labelledby="invitation-access-heading">
+              <div class="invitation-access-header">
+                <div>
+                  <h3 id="invitation-access-heading">Development build access</h3>
                 </div>
-                <small id="development-access-status">No invitation connected.</small>
-                <p id="development-warning" class="development-warning hidden" role="status"></p>
-              </div>
+                  <button
+                    id="invitation-settings-button"
+                    class="icon-button invitation-settings-button"
+                    type="button"
+                    aria-label="Invitation settings"
+                    title="Invitation settings"
+                  >
+                    <span aria-hidden="true">⚙</span>
+                  </button>
+                </div>
+              <div id="invitation-access-state" class="invitation-access-state hidden" data-status="disconnected" role="status">
+                <span class="invitation-status-dot" aria-hidden="true"></span>
+                <div>
+                  <strong id="invitation-access-title">No invitation connected</strong>
+                  <small id="invitation-access-email" class="invitation-access-email"></small>
+                  <small id="invitation-access-copy">Connect an invitation to use private development builds.</small>
+                </div>
+                </div>
+              <div id="invitation-access-actions" class="button-row invitation-action-row">
+                <button id="have-invitation-button" type="button" class="primary">Enter invitation code</button>
+                <button id="get-invitation-button" type="button">Request an invitation</button>
+                </div>
+                <div id="invitation-pending-actions" class="button-row invitation-pending-actions hidden">
+                  <button id="check-invitation-status-button" type="button">Check request status</button>
+                  <button id="withdraw-invitation-button" type="button" class="subtle-button">Withdraw request</button>
+                  <button id="connect-approved-invitation-button" type="button" class="primary hidden">Enter invitation code</button>
+                </div>
+                <div id="invitation-verification-actions" class="button-row invitation-pending-actions hidden">
+                  <button id="continue-invitation-verification-button" type="button">Enter verification code</button>
+                </div>
+              </section>
             </details>
           </section>
         </div>
@@ -94,6 +106,9 @@
               <span class="coffee-cup" aria-hidden="true"></span>
               <span>Buy me a coffee</span>
             </button>
+            <p class="support-copy">
+              Need help with anything? Contact <a href="mailto:support@moazelgabry.com">support@moazelgabry.com</a>.
+            </p>
           </div>
         </section>
       </aside>
@@ -145,6 +160,144 @@
           >
             View full release notes
           </a>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="license-key-dialog" class="invitation-dialog">
+      <form id="license-key-form" class="invitation-dialog-shell" method="dialog">
+        <div class="invitation-dialog-header">
+          <div>
+            <p class="eyebrow">Product access</p>
+            <h3>Enter license key for <span id="license-product-name">this product</span></h3>
+          </div>
+          <button id="license-key-close" class="ghost-button" type="button">Close</button>
+        </div>
+        <p class="invitation-dialog-copy">The key is stored in the OS credential store after the service verifies its product entitlements.</p>
+        <label class="invitation-field" for="license-key">
+          License key
+          <input id="license-key" type="password" autocomplete="off" spellcheck="false" required placeholder="Paste your license key" />
+        </label>
+        <p id="license-key-feedback" class="invitation-form-feedback" role="status"></p>
+        <div class="invitation-dialog-footer">
+          <button class="primary" type="submit">Activate</button>
+          <button id="license-key-cancel" class="ghost-button" type="button">Cancel</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="manage-access-dialog" class="invitation-dialog">
+      <div class="invitation-dialog-shell">
+        <div class="invitation-dialog-header">
+          <div>
+            <p class="eyebrow">Product access</p>
+            <h3 id="manage-access-title">Manage access</h3>
+          </div>
+          <button id="manage-access-close" class="ghost-button" type="button">Close</button>
+        </div>
+        <p class="invitation-dialog-copy">Each source can be deactivated for this product on this device while other product entitlements remain active.</p>
+        <div id="manage-access-body" class="access-source-list"></div>
+      </div>
+    </dialog>
+
+    <dialog id="invitation-connect-dialog" class="invitation-dialog">
+      <form id="invitation-connect-form" class="invitation-dialog-shell" method="dialog">
+        <div class="invitation-dialog-header">
+          <div>
+            <p class="eyebrow">Development builds</p>
+            <h3>Enter invitation code</h3>
+          </div>
+          <button id="invitation-connect-close" class="ghost-button" type="button">Close</button>
+        </div>
+        <p id="invitation-connect-feedback" class="invitation-form-feedback" role="alert"></p>
+        <details id="invitation-connect-error-details" class="invitation-error-details hidden">
+          <summary>Technical details</summary>
+          <pre id="invitation-connect-error-message"></pre>
+        </details>
+        <label class="invitation-field" for="development-invitation-token">
+          Invitation code
+          <input
+            id="development-invitation-token"
+            type="password"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="Paste your code"
+            aria-describedby="development-access-status"
+          />
+        </label>
+        <small id="development-access-status" class="invitation-field-hint" aria-live="polite"></small>
+        <div class="invitation-dialog-footer">
+          <button id="connect-development-invitation" class="primary" type="submit">Connect</button>
+          <button id="invitation-connect-cancel" class="ghost-button" type="button">Cancel</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="invitation-request-dialog" class="invitation-dialog">
+      <form id="invitation-request-form" class="invitation-dialog-shell" method="dialog">
+        <div class="invitation-dialog-header">
+          <div>
+            <p class="eyebrow">Development builds</p>
+            <h3>Request an invitation</h3>
+          </div>
+          <button id="invitation-request-close" class="ghost-button" type="button">Close</button>
+        </div>
+        <p class="invitation-dialog-copy">I’m building an evolving collection of tools for look development, grading, texture work, and creative utilities. Invitations offer selected access based on your interests and each tool’s stage. Some tools may later become public; others may remain private for invited users over the long term.</p>
+        <p id="invitation-request-feedback" class="invitation-form-feedback" role="status"></p>
+        <label class="invitation-field" for="invitation-request-email">
+          Email address <span class="field-required">(required)</span>
+          <input id="invitation-request-email" type="email" autocomplete="email" required placeholder="you@example.com" />
+        </label>
+        <label class="invitation-field" for="invitation-request-message">
+          Message <span class="field-required">(required)</span>
+          <textarea id="invitation-request-message" rows="3" maxlength="1000" required placeholder="What would you like to test?"></textarea>
+        </label>
+        <label class="invitation-acknowledgement" for="invitation-request-acknowledgement">
+          <input id="invitation-request-acknowledgement" type="checkbox" required />
+          <span>I understand that access is subject to review and not guaranteed. If invited, I’m willing to provide constructive feedback and diagnostic logs, and help investigate issues, including crashes.</span>
+        </label>
+        <div class="invitation-dialog-footer">
+          <button id="invitation-request-submit" class="primary" type="submit">Send request</button>
+          <button id="invitation-request-cancel" class="ghost-button" type="button">Cancel</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="invitation-verify-dialog" class="invitation-dialog">
+      <form id="invitation-verify-form" class="invitation-dialog-shell" method="dialog">
+        <div class="invitation-dialog-header">
+          <div>
+            <p class="eyebrow">Verify your email</p>
+            <h3>Enter the verification code</h3>
+          </div>
+          <button id="invitation-verify-close" class="ghost-button" type="button">Close</button>
+        </div>
+        <p class="invitation-dialog-copy">We sent a verification code to <strong id="invitation-verify-email">your email address</strong>.</p>
+        <label class="invitation-field" for="invitation-verification-code">
+          Verification code
+          <input id="invitation-verification-code" inputmode="numeric" autocomplete="one-time-code" required placeholder="123456" />
+        </label>
+        <p id="invitation-verify-feedback" class="invitation-form-feedback" role="status"></p>
+        <div class="invitation-dialog-footer">
+          <button id="invitation-verify-submit" class="primary" type="submit">Verify email</button>
+          <button id="invitation-verify-cancel" class="ghost-button" type="button">Cancel</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="invitation-settings-dialog" class="invitation-dialog">
+      <div class="invitation-dialog-shell">
+        <div class="invitation-dialog-header">
+          <div>
+            <p class="eyebrow">Invitation settings</p>
+            <h3>Manage private access</h3>
+          </div>
+          <button id="invitation-settings-close" class="ghost-button" type="button">Close</button>
+        </div>
+        <p id="invitation-settings-copy" class="invitation-dialog-copy">Manage your invitation access.</p>
+        <div class="invitation-settings-actions">
+          <button id="replace-development-invitation" class="primary" type="button">Replace invitation</button>
+          <button id="forget-development-invitation" class="danger-button" type="button">Forget invitation</button>
         </div>
       </div>
     </dialog>

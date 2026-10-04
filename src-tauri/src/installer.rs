@@ -144,20 +144,26 @@ pub async fn apply_plugin_action(
     let source_spec = parse_package_source_spec(&resolved.package.download_url);
     let installed_at = Utc::now().to_rfc3339();
     let staging_root = tempdir().context("Failed to create staging directory")?;
-    let stage_bundle_root = staging_root.path().join(&resolved.package.bundle_name);
+    let bundle_specs = package_bundle_specs(&resolved.package);
+    let stage_root = staging_root.path().join("staged-bundles");
+    fs::create_dir_all(&stage_root)
+        .with_context(|| format!("Failed to create {}", stage_root.display()))?;
 
-    let bundle_root = if resolved.package.package_type == "bundle-dir" {
+    let staged_bundles = if resolved.package.package_type == "bundle-dir" {
+        if bundle_specs.len() != 1 {
+            bail!("A bundle-directory package cannot provide multiple OFX bundles");
+        }
         let local_bundle = resolve_local_source_path(&source_spec.source)?;
-        verify_bundle(&local_bundle, &resolved.package)?;
-        stage_bundle_directory(&local_bundle, &stage_bundle_root)?;
-        write_bundle_install_stamp(
-            &stage_bundle_root,
-            plugin_id,
-            &resolved.version,
-            &resolved.package.bundle_identifier,
-            &installed_at,
+        let spec = &bundle_specs[0];
+        verify_bundle(
+            &local_bundle,
+            &resolved.package,
+            &spec.bundle_name,
+            &spec.bundle_identifier,
         )?;
-        stage_bundle_root.clone()
+        let staged = stage_root.join(&spec.bundle_name);
+        stage_bundle_directory(&local_bundle, &staged)?;
+        vec![(spec.clone(), staged)]
     } else {
         let bytes = load_package_bytes(&resolved.package, &source_spec.source).await?;
         verify_archive_hash(&bytes, &resolved.package.sha256)?;
@@ -168,67 +174,64 @@ pub async fn apply_plugin_action(
         } else {
             extract_zip(&bytes, &extracted_root)?;
         }
-
-        let extracted_bundle = find_bundle_root(&extracted_root)?
-            .ok_or_else(|| anyhow!("Archive did not contain an .ofx.bundle"))?;
-        verify_bundle(&extracted_bundle, &resolved.package)?;
-        fs::rename(&extracted_bundle, &stage_bundle_root).with_context(|| {
-            format!(
-                "Failed to stage extracted bundle from {} to {}",
-                extracted_bundle.display(),
-                stage_bundle_root.display()
-            )
-        })?;
-        write_bundle_install_stamp(
-            &stage_bundle_root,
-            plugin_id,
-            &resolved.version,
-            &resolved.package.bundle_identifier,
-            &installed_at,
-        )?;
-        stage_bundle_root.clone()
+        let extracted_bundles = find_bundle_roots(&extracted_root, &bundle_specs)?;
+        let mut staged = Vec::with_capacity(bundle_specs.len());
+        for (spec, extracted_bundle) in extracted_bundles {
+            verify_bundle(
+                &extracted_bundle,
+                &resolved.package,
+                &spec.bundle_name,
+                &spec.bundle_identifier,
+            )?;
+            let staged_bundle = stage_root.join(&spec.bundle_name);
+            fs::rename(&extracted_bundle, &staged_bundle).with_context(|| {
+                format!(
+                    "Failed to stage extracted bundle from {} to {}",
+                    extracted_bundle.display(),
+                    staged_bundle.display()
+                )
+            })?;
+            staged.push((spec, staged_bundle));
+        }
+        staged
     };
 
-    let install_root = PathBuf::from(&resolved.package.install_path);
-    fs::create_dir_all(&install_root).ok();
-
-    if cfg!(target_os = "windows") {
-        privileged_install_windows(
-            &bundle_root,
-            &install_root,
-            &resolved.package.bundle_name,
-            source_spec.simulate_fail_after_backup,
+    for (spec, staged_bundle) in &staged_bundles {
+        write_bundle_install_stamp(
+            staged_bundle,
+            plugin_id,
+            &resolved.version,
+            &spec.bundle_identifier,
+            &installed_at,
         )?;
-    } else if cfg!(target_os = "macos") {
-        privileged_install_macos(
-            &bundle_root,
-            &install_root,
-            &resolved.package.bundle_name,
-            source_spec.simulate_fail_after_backup,
-        )?;
-    } else if cfg!(target_os = "linux") {
-        privileged_install_linux(
-            &bundle_root,
-            &install_root,
-            &resolved.package.bundle_name,
-            source_spec.simulate_fail_after_backup,
-        )?;
-    } else {
-        bail!("Only macOS, Windows, and Linux are supported in v1");
     }
 
-    let target_bundle = install_root.join(&resolved.package.bundle_name);
+    let install_root = PathBuf::from(&resolved.package.install_path);
+    let bundle_names = staged_bundles
+        .iter()
+        .map(|(spec, _)| spec.bundle_name.clone())
+        .collect::<Vec<_>>();
+    privileged_install_bundle_set(
+        &stage_root,
+        &install_root,
+        &bundle_names,
+        source_spec.simulate_fail_after_backup,
+    )?;
+
     let mut state = load_install_state().unwrap_or_default();
-    state.installs.insert(
-        install_key(plugin_id, &target_bundle),
-        InstallRecord {
-            plugin_id: plugin_id.to_string(),
-            bundle_path: target_bundle.display().to_string(),
-            installed_version: resolved.version.clone(),
-            bundle_identifier: resolved.package.bundle_identifier.clone(),
-            installed_at: installed_at.clone(),
-        },
-    );
+    for (spec, _) in &staged_bundles {
+        let target_bundle = install_root.join(&spec.bundle_name);
+        state.installs.insert(
+            install_key(plugin_id, &target_bundle),
+            InstallRecord {
+                plugin_id: plugin_id.to_string(),
+                bundle_path: target_bundle.display().to_string(),
+                installed_version: resolved.version.clone(),
+                bundle_identifier: spec.bundle_identifier.clone(),
+                installed_at: installed_at.clone(),
+            },
+        );
+    }
     save_install_state(&state)?;
 
     Ok(PluginOperationResult {
@@ -249,35 +252,42 @@ async fn uninstall_plugin(plugin_id: &str, action: &str) -> Result<PluginOperati
     ensure_hosts_closed(&resolved.package.host_processes)?;
 
     let install_root = PathBuf::from(&resolved.package.install_path);
-    let target_bundle = install_root.join(&resolved.package.bundle_name);
-    let install_key = install_key(plugin_id, &target_bundle);
+    let bundle_specs = package_bundle_specs(&resolved.package);
     let mut state = load_install_state().unwrap_or_default();
-    let record = state.installs.get(&install_key).cloned();
-    let stamp = read_bundle_install_stamp(&target_bundle).ok().flatten();
-    let managed_install = record.is_some() || stamp.is_some();
-    let bundle_exists = target_bundle.exists();
+    let bundles = bundle_specs
+        .iter()
+        .map(|spec| {
+            let target = install_root.join(&spec.bundle_name);
+            let key = install_key(plugin_id, &target);
+            let record = state.installs.get(&key).cloned();
+            let stamp = read_bundle_install_stamp(&target).ok().flatten();
+            (spec, target, key, record, stamp)
+        })
+        .collect::<Vec<_>>();
+    let managed_install = bundles
+        .iter()
+        .any(|(_, _, _, record, stamp)| record.is_some() || stamp.is_some());
+    let bundle_exists = bundles.iter().any(|(_, target, _, _, _)| target.is_dir());
 
     if action == "uninstall" && !managed_install {
         bail!("This uninstall requires a managed install. Use force-uninstall to remove a detected unmanaged bundle.");
     }
 
-    if !bundle_exists && record.is_none() && stamp.is_none() {
+    if !bundle_exists && !managed_install {
         bail!("No installed bundle was found for this plugin.");
     }
 
+    let bundle_names = bundles
+        .iter()
+        .map(|(spec, _, _, _, _)| spec.bundle_name.clone())
+        .collect::<Vec<_>>();
     if bundle_exists {
-        if cfg!(target_os = "windows") {
-            privileged_uninstall_windows(&target_bundle, &resolved.package.bundle_name)?;
-        } else if cfg!(target_os = "macos") {
-            privileged_uninstall_macos(&target_bundle, &resolved.package.bundle_name)?;
-        } else if cfg!(target_os = "linux") {
-            privileged_uninstall_linux(&target_bundle, &resolved.package.bundle_name)?;
-        } else {
-            bail!("Only macOS, Windows, and Linux are supported in v1");
-        }
+        privileged_uninstall_bundle_set(&install_root, &bundle_names)?;
     }
 
-    state.installs.remove(&install_key);
+    for (_, _, key, _, _) in bundles {
+        state.installs.remove(&key);
+    }
     save_install_state(&state)?;
 
     let message = if bundle_exists {
@@ -1224,31 +1234,87 @@ fn extract_tar_gz(bytes: &[u8], destination: &Path) -> Result<()> {
     Ok(())
 }
 
-fn find_bundle_root(root: &Path) -> Result<Option<PathBuf>> {
-    for entry in WalkDir::new(root).min_depth(1).max_depth(6) {
-        let entry = entry?;
-        if entry.file_type().is_dir()
-            && entry
-                .file_name()
-                .to_string_lossy()
-                .to_lowercase()
-                .ends_with(".ofx.bundle")
-        {
-            return Ok(Some(entry.into_path()));
-        }
-    }
-    Ok(None)
+#[derive(Debug, Clone)]
+struct BundleInstallSpec {
+    bundle_name: String,
+    bundle_identifier: String,
 }
 
-fn verify_bundle(bundle_root: &Path, package: &PlatformPackage) -> Result<()> {
+fn package_bundle_specs(package: &PlatformPackage) -> Vec<BundleInstallSpec> {
+    let mut specs = vec![BundleInstallSpec {
+        bundle_name: package.bundle_name.clone(),
+        bundle_identifier: package.bundle_identifier.clone(),
+    }];
+    specs.extend(
+        package
+            .additional_bundles
+            .iter()
+            .map(|bundle| BundleInstallSpec {
+                bundle_name: bundle.bundle_name.clone(),
+                bundle_identifier: bundle.bundle_identifier.clone(),
+            }),
+    );
+    specs
+}
+
+fn find_bundle_roots(
+    root: &Path,
+    specs: &[BundleInstallSpec],
+) -> Result<Vec<(BundleInstallSpec, PathBuf)>> {
+    let expected = specs
+        .iter()
+        .map(|spec| spec.bundle_name.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    if expected.len() != specs.len() {
+        bail!("Package metadata contains duplicate OFX bundle names");
+    }
+    for spec in specs {
+        if spec.bundle_name.is_empty()
+            || spec.bundle_name.contains('/')
+            || spec.bundle_name.contains('\\')
+            || !spec.bundle_name.ends_with(".ofx.bundle")
+            || spec.bundle_identifier.trim().is_empty()
+        {
+            bail!("Package metadata contains an invalid OFX bundle target");
+        }
+    }
+    let mut actual = std::collections::BTreeSet::new();
+    for entry in
+        fs::read_dir(root).with_context(|| format!("Failed to inspect {}", root.display()))?
+    {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.ends_with(".ofx.bundle") {
+            actual.insert(name.into_owned());
+        }
+    }
+    if actual != expected.into_iter().map(str::to_string).collect() {
+        bail!("Archive OFX bundle roots do not match the package metadata");
+    }
+    Ok(specs
+        .iter()
+        .map(|spec| (spec.clone(), root.join(&spec.bundle_name)))
+        .collect::<Vec<_>>())
+}
+
+fn verify_bundle(
+    bundle_root: &Path,
+    package: &PlatformPackage,
+    expected_name: &str,
+    expected_identifier: &str,
+) -> Result<()> {
     let name = bundle_root
         .file_name()
         .map(|value| value.to_string_lossy().to_string())
         .ok_or_else(|| anyhow!("Bundle path was missing a file name"))?;
-    if name != package.bundle_name {
+    if name != expected_name {
         bail!(
             "Downloaded bundle name mismatch. Expected {}, found {}",
-            package.bundle_name,
+            expected_name,
             name
         );
     }
@@ -1256,10 +1322,9 @@ fn verify_bundle(bundle_root: &Path, package: &PlatformPackage) -> Result<()> {
     let plist_path = bundle_root.join("Contents").join("Info.plist");
     if !plist_path.exists() {
         if package.platform == "windows" {
-            let expected_binary = package
-                .bundle_name
+            let expected_binary = expected_name
                 .strip_suffix(".ofx.bundle")
-                .unwrap_or(&package.bundle_name);
+                .unwrap_or(expected_name);
             let win64_binary = bundle_root
                 .join("Contents")
                 .join("Win64")
@@ -1270,7 +1335,7 @@ fn verify_bundle(bundle_root: &Path, package: &PlatformPackage) -> Result<()> {
             bail!("Windows bundle did not contain {}", win64_binary.display());
         }
         if package.platform == "linux" {
-            let linux_binary = linux_bundle_binary_path(bundle_root, package)?;
+            let linux_binary = linux_bundle_binary_path(bundle_root, expected_name)?;
             if linux_binary.exists() {
                 return Ok(());
             }
@@ -1289,10 +1354,10 @@ fn verify_bundle(bundle_root: &Path, package: &PlatformPackage) -> Result<()> {
         .and_then(|value| value.as_string())
         .ok_or_else(|| anyhow!("CFBundleIdentifier was missing from Info.plist"))?;
 
-    if bundle_identifier != package.bundle_identifier {
+    if bundle_identifier != expected_identifier {
         bail!(
             "Bundle identifier mismatch. Expected {}, found {}",
-            package.bundle_identifier,
+            expected_identifier,
             bundle_identifier
         );
     }
@@ -1300,11 +1365,10 @@ fn verify_bundle(bundle_root: &Path, package: &PlatformPackage) -> Result<()> {
     Ok(())
 }
 
-fn linux_bundle_binary_path(bundle_root: &Path, package: &PlatformPackage) -> Result<PathBuf> {
-    let binary_name = package
-        .bundle_name
+fn linux_bundle_binary_path(bundle_root: &Path, bundle_name: &str) -> Result<PathBuf> {
+    let binary_name = bundle_name
         .strip_suffix(".ofx.bundle")
-        .unwrap_or(&package.bundle_name);
+        .unwrap_or(bundle_name);
     Ok(bundle_root
         .join("Contents")
         .join(linux_arch_dir())
@@ -1317,6 +1381,427 @@ fn linux_arch_dir() -> &'static str {
         "aarch64" => "Linux-aarch64",
         _ => "Linux-x86-64",
     }
+}
+
+fn validate_bundle_names(bundle_names: &[String]) -> Result<()> {
+    if bundle_names.is_empty() {
+        bail!("At least one OFX bundle is required");
+    }
+    let mut names = std::collections::BTreeSet::new();
+    for name in bundle_names {
+        if !name.ends_with(".ofx.bundle")
+            || !name
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || ".-_".contains(character))
+            || !names.insert(name)
+        {
+            bail!("Invalid or duplicate OFX bundle name: {name}");
+        }
+    }
+    Ok(())
+}
+
+fn privileged_install_bundle_set(
+    staged_root: &Path,
+    install_root: &Path,
+    bundle_names: &[String],
+    simulate_fail_after_backup: bool,
+) -> Result<()> {
+    validate_bundle_names(bundle_names)?;
+    if bundle_names.len() == 1 {
+        let bundle_name = &bundle_names[0];
+        let source_bundle = staged_root.join(bundle_name);
+        if cfg!(target_os = "windows") {
+            return privileged_install_windows(
+                &source_bundle,
+                install_root,
+                bundle_name,
+                simulate_fail_after_backup,
+            );
+        }
+        if cfg!(target_os = "macos") {
+            return privileged_install_macos(
+                &source_bundle,
+                install_root,
+                bundle_name,
+                simulate_fail_after_backup,
+            );
+        }
+        if cfg!(target_os = "linux") {
+            return privileged_install_linux(
+                &source_bundle,
+                install_root,
+                bundle_name,
+                simulate_fail_after_backup,
+            );
+        }
+        bail!("Only macOS, Windows, and Linux are supported in v1");
+    }
+    if cfg!(target_os = "windows") {
+        return privileged_install_bundle_set_windows(
+            staged_root,
+            install_root,
+            bundle_names,
+            simulate_fail_after_backup,
+        );
+    }
+    if cfg!(target_os = "macos") {
+        return privileged_install_bundle_set_macos(
+            staged_root,
+            install_root,
+            bundle_names,
+            simulate_fail_after_backup,
+        );
+    }
+    if cfg!(target_os = "linux") {
+        return privileged_install_bundle_set_linux(
+            staged_root,
+            install_root,
+            bundle_names,
+            simulate_fail_after_backup,
+        );
+    }
+    bail!("Only macOS, Windows, and Linux are supported in v1");
+}
+
+fn privileged_uninstall_bundle_set(install_root: &Path, bundle_names: &[String]) -> Result<()> {
+    validate_bundle_names(bundle_names)?;
+    if bundle_names.len() == 1 {
+        let bundle_name = &bundle_names[0];
+        let target_bundle = install_root.join(bundle_name);
+        if cfg!(target_os = "windows") {
+            return privileged_uninstall_windows(&target_bundle, bundle_name);
+        }
+        if cfg!(target_os = "macos") {
+            return privileged_uninstall_macos(&target_bundle, bundle_name);
+        }
+        if cfg!(target_os = "linux") {
+            return privileged_uninstall_linux(&target_bundle, bundle_name);
+        }
+        bail!("Only macOS, Windows, and Linux are supported in v1");
+    }
+    if cfg!(target_os = "windows") {
+        return privileged_uninstall_bundle_set_windows(install_root, bundle_names);
+    }
+    if cfg!(target_os = "macos") {
+        return privileged_uninstall_bundle_set_macos(install_root, bundle_names);
+    }
+    if cfg!(target_os = "linux") {
+        return privileged_uninstall_bundle_set_linux(install_root, bundle_names);
+    }
+    bail!("Only macOS, Windows, and Linux are supported in v1");
+}
+
+fn privileged_install_bundle_set_windows(
+    staged_root: &Path,
+    install_root: &Path,
+    bundle_names: &[String],
+    simulate_fail_after_backup: bool,
+) -> Result<()> {
+    let token = format!("{}-{}", std::process::id(), Utc::now().timestamp_millis());
+    let script_dir = std::env::temp_dir().join("Moaz Elgabry Plugins");
+    fs::create_dir_all(&script_dir)?;
+    let script_path = script_dir.join(format!("install-bundle-set-{token}.ps1"));
+    let log_path = script_dir.join(format!("install-bundle-set-{token}.log"));
+    let names = bundle_names
+        .iter()
+        .map(|name| format!("'{}'", escape_ps(name)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let script = format!(
+        r#"$ErrorActionPreference = 'Stop'
+$SourceRoot = '{source}'
+$InstallRoot = '{install_root}'
+$BundleNames = @({names})
+$BackupRoot = Join-Path $InstallRoot '.mepm-install-transaction-{token}'
+$LogPath = '{log}'
+$SimulateFailureAfterBackup = {simulate}
+$Touched = [System.Collections.Generic.List[string]]::new()
+$Committed = $false
+try {{
+  Set-Content -Path $LogPath -Value ''
+  New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
+  New-Item -ItemType Directory -Path $BackupRoot -Force | Out-Null
+  foreach ($name in $BundleNames) {{
+    $source = Join-Path $SourceRoot $name
+    if (!(Test-Path -LiteralPath $source -PathType Container)) {{ throw "Staged bundle missing: $name" }}
+    $target = Join-Path $InstallRoot $name
+    $backup = Join-Path $BackupRoot $name
+    $Touched.Add($name)
+    if (Test-Path -LiteralPath $target) {{ Move-Item -LiteralPath $target -Destination $backup -Force }}
+    if ($SimulateFailureAfterBackup -eq 1 -and $Touched.Count -eq 1) {{ throw 'Simulated multi-bundle install failure after backup' }}
+  }}
+  foreach ($name in $BundleNames) {{ Copy-Item -LiteralPath (Join-Path $SourceRoot $name) -Destination $InstallRoot -Recurse -Force }}
+  $Committed = $true
+}}
+catch {{
+  foreach ($name in $Touched) {{
+    $target = Join-Path $InstallRoot $name
+    $backup = Join-Path $BackupRoot $name
+    if (Test-Path -LiteralPath $target) {{ Remove-Item -LiteralPath $target -Recurse -Force }}
+    if (Test-Path -LiteralPath $backup) {{ Move-Item -LiteralPath $backup -Destination $target -Force }}
+  }}
+  throw
+}}
+finally {{ if ($Committed -and (Test-Path -LiteralPath $BackupRoot)) {{ Remove-Item -LiteralPath $BackupRoot -Recurse -Force }} }}
+"#,
+        source = escape_ps(&staged_root.display().to_string()),
+        install_root = escape_ps(&install_root.display().to_string()),
+        log = escape_ps(&log_path.display().to_string()),
+        simulate = if simulate_fail_after_backup { 1 } else { 0 },
+    );
+    fs::write(&script_path, script)?;
+    let outer_command = format!(
+        "$ErrorActionPreference='Stop'; $ps = Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'; $args = '-NoProfile -ExecutionPolicy Bypass -File \"{}\"'; $p = Start-Process -FilePath $ps -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ArgumentList $args; exit $p.ExitCode",
+        escape_ps(&script_path.display().to_string())
+    );
+    let status = Command::new(windows_powershell_exe())
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &outer_command,
+        ])
+        .status()
+        .context("Failed to start elevated Windows bundle-set installer")?;
+    if status.success() {
+        let _ = fs::remove_file(&script_path);
+        let _ = fs::remove_file(&log_path);
+        return Ok(());
+    }
+    let details = fs::read_to_string(&log_path).unwrap_or_default();
+    let _ = fs::remove_file(&script_path);
+    bail!(
+        "Windows multi-bundle installation failed with exit code {:?}. {}",
+        status.code(),
+        details.trim()
+    );
+}
+
+fn privileged_uninstall_bundle_set_windows(
+    install_root: &Path,
+    bundle_names: &[String],
+) -> Result<()> {
+    let token = format!("{}-{}", std::process::id(), Utc::now().timestamp_millis());
+    let script_dir = std::env::temp_dir().join("Moaz Elgabry Plugins");
+    fs::create_dir_all(&script_dir)?;
+    let script_path = script_dir.join(format!("uninstall-bundle-set-{token}.ps1"));
+    let names = bundle_names
+        .iter()
+        .map(|name| format!("'{}'", escape_ps(name)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let script = format!(
+        r#"$ErrorActionPreference='Stop'
+$InstallRoot='{root}'; $Names=@({names}); $Backup=Join-Path $InstallRoot '.mepm-uninstall-transaction-{token}'; $Moved=[System.Collections.Generic.List[string]]::new(); $Committed=$false
+try {{ New-Item -ItemType Directory -Path $Backup -Force | Out-Null; foreach($name in $Names) {{ $target=Join-Path $InstallRoot $name; if(Test-Path -LiteralPath $target) {{ $Moved.Add($name); Move-Item -LiteralPath $target -Destination (Join-Path $Backup $name) -Force }} }}; $Committed=$true }}
+catch {{ foreach($name in @($Moved.ToArray()) | Select-Object -Reverse) {{ $saved=Join-Path $Backup $name; if(Test-Path -LiteralPath $saved) {{ Move-Item -LiteralPath $saved -Destination (Join-Path $InstallRoot $name) -Force }} }}; throw }}
+finally {{ if($Committed -and (Test-Path -LiteralPath $Backup)) {{ Remove-Item -LiteralPath $Backup -Recurse -Force }} }}
+"#,
+        root = escape_ps(&install_root.display().to_string())
+    );
+    fs::write(&script_path, script)?;
+    let command = format!("$ps=Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'; $args='-NoProfile -ExecutionPolicy Bypass -File \"{}\"'; $p=Start-Process -FilePath $ps -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ArgumentList $args; exit $p.ExitCode", escape_ps(&script_path.display().to_string()));
+    let status = Command::new(windows_powershell_exe())
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &command,
+        ])
+        .status()
+        .context("Failed to start elevated Windows bundle-set uninstaller")?;
+    let _ = fs::remove_file(&script_path);
+    if !status.success() {
+        bail!(
+            "Windows multi-bundle uninstall failed with exit code {:?}",
+            status.code()
+        );
+    }
+    Ok(())
+}
+
+fn privileged_install_bundle_set_macos(
+    staged_root: &Path,
+    install_root: &Path,
+    bundle_names: &[String],
+    simulate_fail_after_backup: bool,
+) -> Result<()> {
+    privileged_bundle_set_macos(
+        staged_root,
+        install_root,
+        bundle_names,
+        simulate_fail_after_backup,
+        true,
+    )
+}
+
+fn privileged_uninstall_bundle_set_macos(
+    install_root: &Path,
+    bundle_names: &[String],
+) -> Result<()> {
+    privileged_bundle_set_macos(Path::new(""), install_root, bundle_names, false, false)
+}
+
+fn privileged_bundle_set_macos(
+    source_root: &Path,
+    install_root: &Path,
+    bundle_names: &[String],
+    simulate: bool,
+    installing: bool,
+) -> Result<()> {
+    let directory = tempdir().context("Failed to create macOS bundle-set transaction directory")?;
+    let script_path = directory.path().join("bundle-set.sh");
+    let token = format!("{}-{}", std::process::id(), Utc::now().timestamp_millis());
+    let script = r#"#!/bin/sh
+set -eu
+SOURCE_ROOT="$1"; INSTALL_ROOT="$2"; SIMULATE="$3"; INSTALLING="$4"; shift 4
+BACKUP="$INSTALL_ROOT/.mepm-transaction-TOKEN"; TOUCHED=""
+rollback() { status=$?; if [ "$status" -ne 0 ]; then for name in $TOUCHED; do target="$INSTALL_ROOT/$name"; saved="$BACKUP/$name"; rm -rf "$target"; if [ -d "$saved" ]; then mv "$saved" "$target"; fi; done; fi; rm -rf "$BACKUP"; exit "$status"; }
+mkdir -p "$INSTALL_ROOT" "$BACKUP"; trap rollback EXIT HUP INT TERM
+for name in "$@"; do target="$INSTALL_ROOT/$name"; saved="$BACKUP/$name"; TOUCHED="$name $TOUCHED"; if [ -d "$target" ]; then mv "$target" "$saved"; fi; if [ "$SIMULATE" = "1" ] && [ "$TOUCHED" != "" ]; then SIMULATE=0; exit 91; fi; done
+if [ "$INSTALLING" = "1" ]; then for name in "$@"; do cp -R "$SOURCE_ROOT/$name" "$INSTALL_ROOT/"; chmod -R 755 "$INSTALL_ROOT/$name"; chown -R root:wheel "$INSTALL_ROOT/$name"; xattr -dr com.apple.quarantine "$INSTALL_ROOT/$name" || true; codesign --force --deep --sign - "$INSTALL_ROOT/$name"; done; fi
+rm -rf "$BACKUP"; trap - EXIT HUP INT TERM
+"#;
+    let script = script.replace("TOKEN", &token);
+    fs::write(&script_path, script)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut p = fs::metadata(&script_path)?.permissions();
+        p.set_mode(0o755);
+        fs::set_permissions(&script_path, p)?;
+    }
+    let names = bundle_names
+        .iter()
+        .map(|name| format!("{}", escape_osascript(name)))
+        .collect::<Vec<_>>();
+    let names_shell = names
+        .iter()
+        .map(|name| format!("quoted form of \"{}\"", name))
+        .collect::<Vec<_>>()
+        .join(" & \" \" & ");
+    let command = format!("quoted form of scriptPath & \" \" & quoted form of sourceRoot & \" \" & quoted form of installRoot & \" \" & quoted form of simulate & \" \" & quoted form of installing & \" \" & {names_shell}");
+    let status = Command::new("osascript")
+        .args([
+            "-e",
+            &format!(
+                "set scriptPath to \"{}\"",
+                escape_osascript(&script_path.display().to_string())
+            ),
+            "-e",
+            &format!(
+                "set sourceRoot to \"{}\"",
+                escape_osascript(&source_root.display().to_string())
+            ),
+            "-e",
+            &format!(
+                "set installRoot to \"{}\"",
+                escape_osascript(&install_root.display().to_string())
+            ),
+            "-e",
+            &format!("set simulate to \"{}\"", if simulate { "1" } else { "0" }),
+            "-e",
+            &format!(
+                "set installing to \"{}\"",
+                if installing { "1" } else { "0" }
+            ),
+            "-e",
+            &format!("do shell script {} with administrator privileges", command),
+        ])
+        .status()
+        .context("Failed to start elevated macOS bundle-set transaction")?;
+    if !status.success() {
+        bail!(
+            "macOS multi-bundle {} failed with exit code {:?}",
+            if installing { "install" } else { "uninstall" },
+            status.code()
+        );
+    }
+    Ok(())
+}
+
+fn privileged_install_bundle_set_linux(
+    staged_root: &Path,
+    install_root: &Path,
+    bundle_names: &[String],
+    simulate_fail_after_backup: bool,
+) -> Result<()> {
+    privileged_bundle_set_linux(
+        staged_root,
+        install_root,
+        bundle_names,
+        simulate_fail_after_backup,
+        true,
+    )
+}
+
+fn privileged_uninstall_bundle_set_linux(
+    install_root: &Path,
+    bundle_names: &[String],
+) -> Result<()> {
+    privileged_bundle_set_linux(Path::new(""), install_root, bundle_names, false, false)
+}
+
+fn privileged_bundle_set_linux(
+    source_root: &Path,
+    install_root: &Path,
+    bundle_names: &[String],
+    simulate: bool,
+    installing: bool,
+) -> Result<()> {
+    let pkexec = find_linux_pkexec().ok_or_else(|| {
+        anyhow!("pkexec executable was not found. A PolicyKit-capable environment is required.")
+    })?;
+    let directory = tempdir().context("Failed to create Linux bundle-set transaction directory")?;
+    let script_path = directory.path().join("bundle-set.sh");
+    let token = format!("{}-{}", std::process::id(), Utc::now().timestamp_millis());
+    let script = r#"#!/bin/sh
+set -eu
+SOURCE_ROOT="$1"; INSTALL_ROOT="$2"; LOG_PATH="$3"; SIMULATE="$4"; INSTALLING="$5"; shift 5
+BACKUP="$INSTALL_ROOT/.mepm-transaction-TOKEN"; TOUCHED=""
+rollback() { status=$?; if [ "$status" -ne 0 ]; then for name in $TOUCHED; do target="$INSTALL_ROOT/$name"; saved="$BACKUP/$name"; rm -rf "$target"; if [ -d "$saved" ]; then mv "$saved" "$target"; fi; done; fi; rm -rf "$BACKUP"; exit "$status"; }
+mkdir -p "$INSTALL_ROOT" "$BACKUP"; : > "$LOG_PATH"; trap rollback EXIT HUP INT TERM
+for name in "$@"; do target="$INSTALL_ROOT/$name"; saved="$BACKUP/$name"; TOUCHED="$name $TOUCHED"; if [ -d "$target" ]; then mv "$target" "$saved"; fi; if [ "$SIMULATE" = "1" ]; then SIMULATE=0; exit 91; fi; done
+if [ "$INSTALLING" = "1" ]; then for name in "$@"; do cp -R "$SOURCE_ROOT/$name" "$INSTALL_ROOT/"; chmod -R 755 "$INSTALL_ROOT/$name"; chown -R root:root "$INSTALL_ROOT/$name"; done; fi
+rm -rf "$BACKUP"; trap - EXIT HUP INT TERM
+"#;
+    fs::write(&script_path, script.replace("TOKEN", &token))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut p = fs::metadata(&script_path)?.permissions();
+        p.set_mode(0o755);
+        fs::set_permissions(&script_path, p)?;
+    }
+    let log_path = std::env::temp_dir().join(format!("mepm-bundle-set-{token}.log"));
+    let mut command = Command::new(pkexec);
+    let arguments = [
+        script_path.display().to_string(),
+        source_root.display().to_string(),
+        install_root.display().to_string(),
+        log_path.display().to_string(),
+        if simulate { "1" } else { "0" }.to_string(),
+        if installing { "1" } else { "0" }.to_string(),
+    ];
+    command.args(arguments);
+    command.args(bundle_names);
+    let status = command
+        .status()
+        .context("Failed to start elevated Linux bundle-set transaction")?;
+    let details = fs::read_to_string(&log_path).unwrap_or_default();
+    let _ = fs::remove_file(&log_path);
+    if !status.success() {
+        bail!(
+            "Linux multi-bundle {} failed with exit code {:?}. {}",
+            if installing { "install" } else { "uninstall" },
+            status.code(),
+            details.trim()
+        );
+    }
+    Ok(())
 }
 
 fn privileged_install_windows(
@@ -1988,6 +2473,75 @@ fn normalize_runtime_path(raw: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn archive_bundle_roots_match_the_complete_package_set() {
+        let temp = tempdir().unwrap();
+        let fixed = "Hyogen.ofx.bundle".to_string();
+        let modules = "HyogenModules.ofx.bundle".to_string();
+        fs::create_dir(temp.path().join(&fixed)).unwrap();
+        fs::create_dir(temp.path().join(&modules)).unwrap();
+        let specs = vec![
+            BundleInstallSpec {
+                bundle_name: fixed.clone(),
+                bundle_identifier: "com.moazelgabry.hyogen.dev".to_string(),
+            },
+            BundleInstallSpec {
+                bundle_name: modules.clone(),
+                bundle_identifier: "com.moazelgabry.hyogen.modules".to_string(),
+            },
+        ];
+
+        let roots = find_bundle_roots(temp.path(), &specs).unwrap();
+        assert_eq!(roots.len(), 2);
+        assert!(roots.iter().any(|(spec, path)| {
+            spec.bundle_name == fixed && path == &temp.path().join("Hyogen.ofx.bundle")
+        }));
+        assert!(roots.iter().any(|(spec, path)| {
+            spec.bundle_name == modules && path == &temp.path().join("HyogenModules.ofx.bundle")
+        }));
+    }
+
+    #[test]
+    fn archive_bundle_roots_reject_missing_or_unexpected_products() {
+        let temp = tempdir().unwrap();
+        let expected = vec![
+            BundleInstallSpec {
+                bundle_name: "Hyogen.ofx.bundle".to_string(),
+                bundle_identifier: "com.moazelgabry.hyogen.dev".to_string(),
+            },
+            BundleInstallSpec {
+                bundle_name: "HyogenModules.ofx.bundle".to_string(),
+                bundle_identifier: "com.moazelgabry.hyogen.modules".to_string(),
+            },
+        ];
+        fs::create_dir(temp.path().join("Hyogen.ofx.bundle")).unwrap();
+        assert!(find_bundle_roots(temp.path(), &expected).is_err());
+        fs::create_dir(temp.path().join("Other.ofx.bundle")).unwrap();
+        assert!(find_bundle_roots(temp.path(), &expected).is_err());
+    }
+
+    #[test]
+    fn bundle_set_names_are_unique_safe_leaf_names() {
+        assert!(validate_bundle_names(&[
+            "Hyogen.ofx.bundle".to_string(),
+            "HyogenModules.ofx.bundle".to_string(),
+        ])
+        .is_ok());
+        for invalid in [
+            "../Hyogen.ofx.bundle",
+            "Hyogen Modules.ofx.bundle",
+            "Hyogen/../Modules.ofx.bundle",
+            "Hyogen.ofx.bundle/",
+        ] {
+            assert!(validate_bundle_names(&[invalid.to_string()]).is_err());
+        }
+        assert!(validate_bundle_names(&[
+            "Hyogen.ofx.bundle".to_string(),
+            "Hyogen.ofx.bundle".to_string(),
+        ])
+        .is_err());
+    }
 
     #[test]
     fn diagnostics_environment_replaces_supported_tokens() {
