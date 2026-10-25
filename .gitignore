@@ -14,3 +14,4 @@ local-*.png
 PLUGIN_MANAGER_DEVELOPMENT_NOTES.md
 tools/copy-access-receipt-seed.ps1
 ACCESS-RECEIPT-SETUP.md
+/.codex-manager-target/

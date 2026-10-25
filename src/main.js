@@ -1936,6 +1936,13 @@ async function refreshDashboard() {
   try {
     hideAlert();
     state.dashboard = await invoke("dashboard_state", { operationId });
+    // Show the catalog as soon as it is available. Development receipt checks
+    // can take several seconds, and withholding the dashboard until they finish
+    // makes a valid catalog look empty during startup or refresh.
+    renderDashboard();
+    // renderDashboard creates the plugin controls, so keep them disabled while
+    // the remaining access checks are still updating their status.
+    setBusy(true);
     await activateDevelopmentReceiptsForCatalog();
     updateOperationProgress({
       label: "Refreshing access status",

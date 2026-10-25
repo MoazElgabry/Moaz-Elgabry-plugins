@@ -16,6 +16,7 @@ const HYOGEN_BUNDLE_IDENTIFIER: &str = "com.moazelgabry.hyogen.dev";
 const HYOGEN_BUNDLE_NAME: &str = "Hyogen.ofx.bundle";
 const HYOGEN_MODULES_BUNDLE_IDENTIFIER: &str = "com.moazelgabry.hyogen.modules";
 const HYOGEN_MODULES_BUNDLE_NAME: &str = "HyogenModules.ofx.bundle";
+const CATALOG_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 const HOST_PROCESSES: &[&str] = &[
     "Resolve",
     "DaVinci Resolve",
@@ -119,7 +120,7 @@ struct DownloadTicketRequest {
 
 pub async fn validate_token_and_catalog(token: &str) -> Result<ValidatedDevelopmentCatalog> {
     let token = credentials::validate_invitation_token(token)?;
-    let client = production_client()?;
+    let client = catalog_client()?;
     fetch_catalog(&client, token).await
 }
 
@@ -141,7 +142,7 @@ pub async fn catalog_from_credential() -> Result<Option<ValidatedDevelopmentCata
         }
     };
     let _ = crate::invitation_status::write(crate::invitation_status::InvitationStatus::Connected);
-    let client = production_client()?;
+    let client = catalog_client()?;
     match fetch_catalog(&client, &token).await {
         Ok(catalog) => Ok(Some(catalog)),
         Err(error) if invitation_was_rejected(&error) => {
@@ -481,6 +482,17 @@ fn production_client() -> Result<Client> {
         .user_agent(concat!("MoazElgabryPlugins/", env!("CARGO_PKG_VERSION")))
         .build()
         .context("Failed to create the development service client")
+}
+
+fn catalog_client() -> Result<Client> {
+    if !DEV_API_ORIGIN.starts_with("https://") {
+        bail!("The production development service must use HTTPS.");
+    }
+    Client::builder()
+        .user_agent(concat!("MoazElgabryPlugins/", env!("CARGO_PKG_VERSION")))
+        .timeout(CATALOG_REQUEST_TIMEOUT)
+        .build()
+        .context("Failed to create the development catalog client")
 }
 
 fn ticket_download_url(download_path: &str, artifact_id: u64, ticket: &str) -> Result<Url> {
