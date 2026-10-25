@@ -200,6 +200,8 @@ pub struct PluginManifest {
     pub display_name: String,
     pub icon_url: Option<String>,
     pub version: String,
+    #[serde(default)]
+    pub channel: Option<String>,
     pub release_date: String,
     pub release_notes_url: String,
     pub release_highlights: Option<String>,
@@ -218,6 +220,8 @@ pub struct PluginManifest {
 #[serde(rename_all = "camelCase")]
 pub struct PluginRelease {
     pub version: String,
+    #[serde(default)]
+    pub channel: Option<String>,
     pub release_date: String,
     pub release_notes_url: String,
     pub release_highlights: Option<String>,

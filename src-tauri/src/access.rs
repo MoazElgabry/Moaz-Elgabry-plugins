@@ -636,8 +636,26 @@ fn atomic_replace(temp_path: &Path, path: &Path) -> Result<()> { fs::rename(temp
 
 #[cfg(windows)]
 fn atomic_replace(temp_path: &Path, path: &Path) -> Result<()> {
-    if path.exists() { fs::remove_file(path).with_context(|| format!("Failed to replace {}", path.display()))?; }
-    fs::rename(temp_path, path).with_context(|| format!("Failed to atomically write {}", path.display()))
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH};
+
+    let source: Vec<u16> = temp_path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let destination: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    // Replacing via remove + rename creates a window where the final receipt
+    // does not exist. Hyogen watches this directory and can mistake that gap
+    // for a revoked grant. MoveFileExW replaces the destination atomically.
+    let moved = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if moved == 0 {
+        return Err(std::io::Error::last_os_error())
+            .with_context(|| format!("Failed to atomically write {}", path.display()));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

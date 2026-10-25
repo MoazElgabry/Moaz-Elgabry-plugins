@@ -2,6 +2,8 @@ use crate::credentials;
 use crate::models::{AdditionalBundle, PlatformPackage, PluginDiagnostics, PluginRelease};
 use crate::operation_progress::OperationProgressReporter;
 use anyhow::{anyhow, bail, Context, Result};
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use base64::Engine;
 use reqwest::header::AUTHORIZATION;
 use reqwest::{Client, Request, Url};
 use serde::{Deserialize, Serialize};
@@ -41,6 +43,7 @@ pub struct ValidatedDevelopmentRelease {
 pub struct ValidatedDevelopmentCatalog {
     pub email: Option<String>,
     pub plugin_grants: Option<Vec<String>>,
+    pub private_plugin_icons: HashMap<String, String>,
     pub releases: Vec<ValidatedDevelopmentRelease>,
     pub warnings: Vec<String>,
 }
@@ -52,6 +55,8 @@ struct DevelopmentCatalogResponse {
     email: Option<String>,
     #[serde(default)]
     plugin_grants: Option<Vec<String>>,
+    #[serde(default)]
+    plugin_icons: HashMap<String, String>,
     releases: Vec<DevelopmentRelease>,
 }
 
@@ -119,16 +124,37 @@ pub async fn validate_token_and_catalog(token: &str) -> Result<ValidatedDevelopm
 }
 
 pub async fn catalog_from_credential() -> Result<Option<ValidatedDevelopmentCatalog>> {
-    let Some(token) = credentials::invitation_token()? else {
-        crate::access::forget_development_receipts()?;
-        return Ok(None);
+    let token = match credentials::invitation_token() {
+        Ok(Some(token)) => token,
+        Ok(None) => {
+            let _ = crate::invitation_status::write(
+                crate::invitation_status::InvitationStatus::Disconnected,
+            );
+            crate::access::forget_development_receipts()?;
+            return Ok(None);
+        }
+        Err(error) => {
+            let _ = crate::invitation_status::write(
+                crate::invitation_status::InvitationStatus::Unknown,
+            );
+            return Err(error);
+        }
     };
+    let _ = crate::invitation_status::write(crate::invitation_status::InvitationStatus::Connected);
     let client = production_client()?;
     match fetch_catalog(&client, &token).await {
         Ok(catalog) => Ok(Some(catalog)),
         Err(error) if invitation_was_rejected(&error) => {
             crate::access::forget_development_receipts()?;
-            credentials::forget_invitation_token()?;
+            if let Err(store_error) = credentials::forget_invitation_token() {
+                let _ = crate::invitation_status::write(
+                    crate::invitation_status::InvitationStatus::Unknown,
+                );
+                return Err(store_error);
+            }
+            let _ = crate::invitation_status::write(
+                crate::invitation_status::InvitationStatus::Disconnected,
+            );
             Err(anyhow!("The development invitation was revoked or expired. Its local development receipts were cleared; connect a valid invitation to restore access."))
         }
         Err(error) => Err(error),
@@ -167,15 +193,17 @@ fn validate_catalog(catalog: DevelopmentCatalogResponse) -> Result<ValidatedDeve
         );
     }
 
+    let private_plugin_icons = validate_private_plugin_icons(
+        catalog.plugin_icons,
+        catalog.plugin_grants.as_deref(),
+    );
     let mut validated = ValidatedDevelopmentCatalog {
         email: catalog.email,
         plugin_grants: catalog.plugin_grants,
+        private_plugin_icons,
         ..Default::default()
     };
     for raw in catalog.releases {
-        if raw.plugin.slug != "hyogen" {
-            continue;
-        }
         if let Some(grants) = validated.plugin_grants.as_ref() {
             if !grants.iter().any(|grant| grant == &raw.plugin.slug) {
                 continue;
@@ -186,22 +214,38 @@ fn validate_catalog(catalog: DevelopmentCatalogResponse) -> Result<ValidatedDeve
             Err(warning) => validated.warnings.push(warning.to_string()),
         }
     }
-    if let Some(grants) = validated.plugin_grants.as_ref() {
-        if !grants.iter().any(|grant| grant == "hyogen") {
-            validated
-                .warnings
-                .push("This invitation does not include Hyogen access.".to_string());
-        } else if !validated
-            .releases
-            .iter()
-            .any(|release| release.plugin_slug == "hyogen")
-        {
-            validated.warnings.push(
-                "The invitation grants Hyogen, but WordPress returned no usable published Hyogen release. Check the release state and its Windows/macOS publication targets.".to_string(),
-            );
-        }
-    }
     Ok(validated)
+}
+
+fn validate_private_plugin_icons(
+    icons: HashMap<String, String>,
+    grants: Option<&[String]>,
+) -> HashMap<String, String> {
+    const MAX_ICON_BYTES: usize = 4 * 1024 * 1024;
+    const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+
+    let Some(grants) = grants else {
+        return HashMap::new();
+    };
+    icons
+        .into_iter()
+        .filter_map(|(plugin_slug, encoded)| {
+            if !grants.iter().any(|grant| grant == &plugin_slug) {
+                return None;
+            }
+            let bytes = BASE64_STANDARD.decode(encoded).ok()?;
+            if bytes.len() < PNG_SIGNATURE.len()
+                || bytes.len() > MAX_ICON_BYTES
+                || !bytes.starts_with(PNG_SIGNATURE)
+            {
+                return None;
+            }
+            Some((
+                plugin_slug,
+                format!("data:image/png;base64,{}", BASE64_STANDARD.encode(bytes)),
+            ))
+        })
+        .collect()
 }
 
 fn validate_release(raw: DevelopmentRelease) -> Result<ValidatedDevelopmentRelease> {
@@ -289,11 +333,12 @@ fn validate_release(raw: DevelopmentRelease) -> Result<ValidatedDevelopmentRelea
         plugin_name: raw.plugin.name,
         access_mode: raw.plugin.access_mode,
         license_url: raw.plugin.license_url,
-        channel: raw.channel,
+        channel: raw.channel.clone(),
         state: raw.state,
         keep_for_rollback: raw.keep_for_rollback,
         release: PluginRelease {
             version: raw.version,
+            channel: Some(raw.channel.clone()),
             release_date: raw.published_at.unwrap_or_default(),
             release_notes_url: String::new(),
             release_highlights: first_nonempty(raw.highlights, raw.notes),
@@ -308,6 +353,7 @@ fn version_matches_channel(version: &semver::Version, channel: &str) -> bool {
         "stable" => version.pre.is_empty(),
         "beta" => numbered_prerelease(version.pre.as_str(), "beta."),
         "dev" => version.build.is_empty() && numbered_prerelease(version.pre.as_str(), "dev."),
+        "private" => version.pre.is_empty() && version.build.is_empty(),
         _ => false,
     }
 }
@@ -512,7 +558,7 @@ mod tests {
     }
 
     #[test]
-    fn signed_allowlist_accepts_only_the_expected_hyogen_identity_and_targets() {
+    fn invitation_catalog_accepts_a_valid_hyogen_grant_and_targets() {
         let raw: DevelopmentCatalogResponse = serde_json::from_str(&valid_catalog_json()).unwrap();
         let catalog = validate_catalog(raw).unwrap();
         assert_eq!(catalog.releases.len(), 1);
@@ -534,15 +580,18 @@ mod tests {
     }
 
     #[test]
-    fn unknown_and_mismatched_grants_are_ignored_with_non_secret_warnings() {
+    fn ungranted_products_are_ignored() {
         let json = valid_catalog_json()
             .replace("\"hyogen\"", "\"unknown-plugin\"")
+            .replace(
+                "\"plugin_grants\": [\"unknown-plugin\"]",
+                "\"plugin_grants\": [\"hyogen\"]",
+            )
             .replace("mer_", "should-never-appear_");
         let raw: DevelopmentCatalogResponse = serde_json::from_str(&json).unwrap();
         let catalog = validate_catalog(raw).unwrap();
         assert!(catalog.releases.is_empty());
-        assert_eq!(catalog.warnings.len(), 1);
-        assert!(!catalog.warnings[0].contains("mer_"));
+        assert!(catalog.warnings.is_empty());
     }
 
     #[test]
@@ -576,6 +625,26 @@ mod tests {
             valid_catalog_json().replace("\"channel\":\"dev\"", "\"channel\":\"stable\"");
         let mismatch: DevelopmentCatalogResponse = serde_json::from_str(&mismatch_json).unwrap();
         assert!(validate_catalog(mismatch).unwrap().releases.is_empty());
+    }
+
+    #[test]
+    fn private_channel_accepts_numeric_versions_for_any_granted_project() {
+        let json = valid_catalog_json()
+            .replace("\"hyogen\"", "\"bgrade\"")
+            .replace("\"Hyogen\"", "\"B-Grade\"")
+            .replace("com.moazelgabry.hyogen.dev", "com.moazelgabry.bgrade")
+            .replace("2.0.0-dev.7", "0.1.0")
+            .replace("\"channel\":\"dev\"", "\"channel\":\"private\"");
+        let raw: DevelopmentCatalogResponse = serde_json::from_str(&json).unwrap();
+        let catalog = validate_catalog(raw).unwrap();
+        assert_eq!(catalog.releases.len(), 1);
+        assert_eq!(catalog.releases[0].plugin_slug, "bgrade");
+        assert_eq!(catalog.releases[0].channel, "private");
+        assert_eq!(catalog.releases[0].release.channel.as_deref(), Some("private"));
+
+        let invalid = json.replace("0.1.0", "0.1.0-private.1");
+        let raw: DevelopmentCatalogResponse = serde_json::from_str(&invalid).unwrap();
+        assert!(validate_catalog(raw).unwrap().releases.is_empty());
     }
 
     #[test]

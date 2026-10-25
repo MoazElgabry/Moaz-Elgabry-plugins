@@ -1336,7 +1336,16 @@ fn find_bundle_roots(
         }
     }
     if actual != expected.into_iter().map(str::to_string).collect() {
-        bail!("Archive OFX bundle roots do not match the package metadata");
+        let expected_names = specs
+            .iter()
+            .map(|spec| spec.bundle_name.as_str())
+            .collect::<Vec<_>>();
+        let actual_names = actual.iter().map(String::as_str).collect::<Vec<_>>();
+        bail!(
+            "Archive OFX bundle roots do not match the package metadata (expected: {:?}; found: {:?})",
+            expected_names,
+            actual_names
+        );
     }
     Ok(specs
         .iter()
@@ -1847,19 +1856,15 @@ rm -rf "$BACKUP"; trap - EXIT HUP INT TERM
     Ok(())
 }
 
-fn privileged_install_windows(
+fn windows_install_script(
     source_bundle: &Path,
     install_root: &Path,
     bundle_name: &str,
+    log_path: &Path,
     simulate_fail_after_backup: bool,
-) -> Result<()> {
-    let token = format!("{}-{}", std::process::id(), Utc::now().timestamp_millis());
-    let script_dir = std::env::temp_dir().join("Moaz Elgabry Plugins");
-    fs::create_dir_all(&script_dir)
-        .with_context(|| format!("Failed to create {}", script_dir.display()))?;
-    let script_path = script_dir.join(format!("install-plugin-{token}.ps1"));
-    let log_path = script_dir.join(format!("install-plugin-{token}.log"));
-    let script = format!(
+    token: &str,
+) -> String {
+    format!(
         r#"$ErrorActionPreference = "Stop"
 $SourceBundle = '{source}'
 $InstallRoot = '{install_root}'
@@ -1867,7 +1872,11 @@ $BundleName = '{bundle_name}'
 $LogPath = '{log}'
 $SimulateFailureAfterBackup = {simulate_fail}
 $target = Join-Path $InstallRoot $BundleName
-$backup = Join-Path $InstallRoot ($BundleName + ".manager-backup")
+$backup = Join-Path $InstallRoot ($BundleName + ".manager-backup-{token}")
+$stage = Join-Path $InstallRoot ("." + $BundleName + ".manager-stage-{token}")
+$existingBundleBackedUp = $false
+$newBundlePlaced = $false
+$committed = $false
 
 function Write-InstallLog([string]$Message) {{
   $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
@@ -1880,38 +1889,86 @@ try {{
   Write-InstallLog "SourceBundle=$SourceBundle"
   Write-InstallLog "InstallRoot=$InstallRoot"
   Write-InstallLog "BundleName=$BundleName"
+  Write-InstallLog "Stage=$stage"
+  Write-InstallLog "Target=$target"
+  Write-InstallLog "Backup=$backup"
 
-  if (Test-Path $backup) {{ Remove-Item $backup -Recurse -Force }}
-  if (!(Test-Path $InstallRoot)) {{ New-Item -ItemType Directory -Path $InstallRoot | Out-Null }}
-  if (Test-Path $target) {{
+  if (!(Test-Path -LiteralPath $SourceBundle -PathType Container)) {{ throw "Staged bundle is missing: $SourceBundle" }}
+  if (!(Test-Path -LiteralPath $InstallRoot -PathType Container)) {{ New-Item -ItemType Directory -Path $InstallRoot | Out-Null }}
+
+  Write-InstallLog "Copying bundle to a temporary install directory"
+  New-Item -ItemType Directory -Path $stage | Out-Null
+  $robocopy = Join-Path $env:SystemRoot 'System32\robocopy.exe'
+  $copyOutput = & $robocopy $SourceBundle $stage /E /COPY:DAT /DCOPY:DAT /R:5 /W:1 /XJ 2>&1
+  $copyExitCode = $LASTEXITCODE
+  foreach ($line in $copyOutput) {{ Write-InstallLog ([string]$line) }}
+  Write-InstallLog "RobocopyExitCode=$copyExitCode"
+  if ($copyExitCode -ge 8) {{ throw "Bundle staging copy failed with Robocopy exit code $copyExitCode (source: $SourceBundle; destination: $stage)." }}
+
+  if (Test-Path -LiteralPath $target) {{
     Write-InstallLog "Moving existing bundle to backup"
     Move-Item -LiteralPath $target -Destination $backup -Force
+    $existingBundleBackedUp = $true
   }}
   if ($SimulateFailureAfterBackup -eq 1) {{
     Write-InstallLog "Simulating failure after backup for rollback test"
     throw "Simulated install failure after backup"
   }}
-  Write-InstallLog "Copying new bundle"
-  Copy-Item -LiteralPath $SourceBundle -Destination $InstallRoot -Recurse -Force
-  if (Test-Path $backup) {{ Remove-Item $backup -Recurse -Force }}
+  Write-InstallLog "Moving completed staged bundle into place"
+  Move-Item -LiteralPath $stage -Destination $target -Force
+  $newBundlePlaced = $true
+  $committed = $true
   Write-InstallLog "Install completed successfully"
-  exit 0
 }}
 catch {{
+  $committed = $false
   Write-InstallLog ("ERROR: " + $_.Exception.Message)
+  Write-InstallLog ("ERROR_ID: " + $_.FullyQualifiedErrorId)
+  Write-InstallLog ("ERROR_CATEGORY: " + $_.CategoryInfo.ToString())
+  Write-InstallLog ("ERROR_TARGET: " + [string]$_.TargetObject)
   if ($_.ScriptStackTrace) {{
     Write-InstallLog ("STACK: " + $_.ScriptStackTrace)
   }}
-  if (Test-Path $target) {{ Remove-Item $target -Recurse -Force }}
-  if (Test-Path $backup) {{ Move-Item -LiteralPath $backup -Destination $target -Force }}
+  if (($newBundlePlaced -or $existingBundleBackedUp) -and (Test-Path -LiteralPath $target)) {{ Remove-Item -LiteralPath $target -Recurse -Force }}
+  if (Test-Path -LiteralPath $backup) {{ Move-Item -LiteralPath $backup -Destination $target -Force }}
   throw
 }}
+finally {{
+  if (Test-Path -LiteralPath $stage) {{ Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }}
+  if ($committed -and (Test-Path -LiteralPath $backup)) {{
+    try {{ Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction Stop }}
+    catch {{ Write-InstallLog ("WARNING: Install succeeded but backup cleanup failed: " + $_.Exception.Message) }}
+  }}
+}}
 "#,
+        token = token,
         source = escape_ps(&source_bundle.display().to_string()),
         install_root = escape_ps(&install_root.display().to_string()),
         bundle_name = escape_ps(bundle_name),
         log = escape_ps(&log_path.display().to_string()),
         simulate_fail = if simulate_fail_after_backup { 1 } else { 0 }
+    )
+}
+
+fn privileged_install_windows(
+    source_bundle: &Path,
+    install_root: &Path,
+    bundle_name: &str,
+    simulate_fail_after_backup: bool,
+) -> Result<()> {
+    let token = format!("{}-{}", std::process::id(), Utc::now().timestamp_millis());
+    let script_dir = std::env::temp_dir().join("Moaz Elgabry Plugins");
+    fs::create_dir_all(&script_dir)
+        .with_context(|| format!("Failed to create {}", script_dir.display()))?;
+    let script_path = script_dir.join(format!("install-plugin-{token}.ps1"));
+    let log_path = script_dir.join(format!("install-plugin-{token}.log"));
+    let script = windows_install_script(
+        source_bundle,
+        install_root,
+        bundle_name,
+        &log_path,
+        simulate_fail_after_backup,
+        &token,
     );
     fs::write(&script_path, script)
         .with_context(|| format!("Failed to write {}", script_path.display()))?;
@@ -2559,9 +2616,87 @@ mod tests {
             },
         ];
         fs::create_dir(temp.path().join("Hyogen.ofx.bundle")).unwrap();
-        assert!(find_bundle_roots(temp.path(), &expected).is_err());
+        let error = find_bundle_roots(temp.path(), &expected).unwrap_err();
+        assert!(error.to_string().contains(
+            "expected: [\"Hyogen.ofx.bundle\", \"HyogenModules.ofx.bundle\"]"
+        ));
+        assert!(error.to_string().contains("found: [\"Hyogen.ofx.bundle\"]"));
         fs::create_dir(temp.path().join("Other.ofx.bundle")).unwrap();
-        assert!(find_bundle_roots(temp.path(), &expected).is_err());
+        let error = find_bundle_roots(temp.path(), &expected).unwrap_err();
+        assert!(error.to_string().contains(
+            "found: [\"Hyogen.ofx.bundle\", \"Other.ofx.bundle\"]"
+        ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_bundle_install_stages_before_swap_and_restores_old_bundle_on_failure() {
+        let temp = tempdir().unwrap();
+        let source = temp.path().join("source").join("BGrade.ofx.bundle");
+        let install_root = temp.path().join("install");
+        let target = install_root.join("BGrade.ofx.bundle");
+        let source_binary = source.join("Contents").join("Win64").join("BGrade.ofx");
+        let installed_binary = target.join("Contents").join("Win64").join("BGrade.ofx");
+        let success_log = temp.path().join("success.log");
+        let success_script = temp.path().join("success.ps1");
+
+        fs::create_dir_all(source_binary.parent().unwrap()).unwrap();
+        fs::create_dir_all(installed_binary.parent().unwrap()).unwrap();
+        fs::write(&source_binary, b"new version one").unwrap();
+        fs::write(&installed_binary, b"old installed version").unwrap();
+
+        let script = windows_install_script(
+            &source,
+            &install_root,
+            "BGrade.ofx.bundle",
+            &success_log,
+            false,
+            "test-success",
+        );
+        fs::write(&success_script, script).unwrap();
+        let success = Command::new(windows_powershell_exe())
+            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+            .arg(&success_script)
+            .status()
+            .unwrap();
+        assert!(
+            success.success(),
+            "{}",
+            fs::read_to_string(&success_log).unwrap_or_default()
+        );
+        assert_eq!(fs::read(&installed_binary).unwrap(), b"new version one");
+        assert!(!install_root
+            .join("BGrade.ofx.bundle.manager-backup-test-success")
+            .exists());
+        assert!(!install_root
+            .join(".BGrade.ofx.bundle.manager-stage-test-success")
+            .exists());
+
+        fs::write(&source_binary, b"new version two").unwrap();
+        let failure_log = temp.path().join("failure.log");
+        let failure_script = temp.path().join("failure.ps1");
+        let script = windows_install_script(
+            &source,
+            &install_root,
+            "BGrade.ofx.bundle",
+            &failure_log,
+            true,
+            "test-rollback",
+        );
+        fs::write(&failure_script, script).unwrap();
+        let failure = Command::new(windows_powershell_exe())
+            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+            .arg(&failure_script)
+            .status()
+            .unwrap();
+        assert!(!failure.success());
+        assert_eq!(fs::read(&installed_binary).unwrap(), b"new version one");
+        assert!(!install_root
+            .join("BGrade.ofx.bundle.manager-backup-test-rollback")
+            .exists());
+        assert!(!install_root
+            .join(".BGrade.ofx.bundle.manager-stage-test-rollback")
+            .exists());
     }
 
     #[test]

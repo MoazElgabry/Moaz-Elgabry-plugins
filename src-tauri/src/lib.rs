@@ -3,6 +3,7 @@ mod catalog;
 mod credentials;
 mod development;
 mod installer;
+mod invitation_status;
 mod models;
 mod operation_progress;
 mod settings;
@@ -116,9 +117,11 @@ async fn connect_development_invitation(token: String) -> Result<Option<String>,
     crate::access::forget_development_receipts().map_err(|error| {
         models::UiError::from_error("development_invitation", &error).to_json_string()
     })?;
-    crate::credentials::store_invitation_token(&token).map_err(|error| {
-        models::UiError::from_error("development_invitation", &error).to_json_string()
-    })?;
+    if let Err(error) = crate::credentials::store_invitation_token(&token) {
+        let _ = crate::invitation_status::write(crate::invitation_status::InvitationStatus::Unknown);
+        return Err(models::UiError::from_error("development_invitation", &error).to_json_string());
+    }
+    let _ = crate::invitation_status::write(crate::invitation_status::InvitationStatus::Connected);
     Ok(catalog.email)
 }
 
@@ -127,9 +130,12 @@ async fn forget_development_invitation() -> Result<(), String> {
     crate::access::forget_development_receipts().map_err(|error| {
         models::UiError::from_error("development_invitation", &error).to_json_string()
     })?;
-    crate::credentials::forget_invitation_token().map_err(|error| {
-        models::UiError::from_error("development_invitation", &error).to_json_string()
-    })
+    if let Err(error) = crate::credentials::forget_invitation_token() {
+        let _ = crate::invitation_status::write(crate::invitation_status::InvitationStatus::Unknown);
+        return Err(models::UiError::from_error("development_invitation", &error).to_json_string());
+    }
+    let _ = crate::invitation_status::write(crate::invitation_status::InvitationStatus::Disconnected);
+    Ok(())
 }
 
 #[tauri::command]
@@ -256,6 +262,12 @@ pub fn run() {
             open_support_link
         ])
         .setup(|app| {
+            let status = match crate::credentials::invitation_token() {
+                Ok(Some(_)) => crate::invitation_status::InvitationStatus::Connected,
+                Ok(None) => crate::invitation_status::InvitationStatus::Disconnected,
+                Err(_) => crate::invitation_status::InvitationStatus::Unknown,
+            };
+            let _ = crate::invitation_status::write(status);
             if let Some(window) = app.get_webview_window("main") {
                 place_startup_window(&window)?;
                 window.show()?;

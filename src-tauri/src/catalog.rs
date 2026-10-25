@@ -37,6 +37,13 @@ pub async fn build_dashboard_state(
     let app_settings = settings::load_settings()?;
     let bundle = load_catalog_bundle(&app_settings, progress.as_ref(), (0, 86)).await?;
     let install_state = installer::load_install_state()?;
+    let invitation_token = crate::credentials::invitation_token();
+    let invitation_status = match &invitation_token {
+        Ok(Some(_)) => crate::invitation_status::InvitationStatus::Connected,
+        Ok(None) => crate::invitation_status::InvitationStatus::Disconnected,
+        Err(_) => crate::invitation_status::InvitationStatus::Unknown,
+    };
+    let _ = crate::invitation_status::write(invitation_status);
     let manager = ManagerSummary {
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         platform: installer::current_platform().to_string(),
@@ -45,9 +52,10 @@ pub async fn build_dashboard_state(
         catalog_url: bundle.source_label.clone(),
         beta_releases_enabled: app_settings.beta_releases_enabled,
         development_builds_enabled: app_settings.development_builds_enabled,
-        development_invitation_connected: crate::credentials::invitation_token()
-            .unwrap_or(None)
-            .is_some(),
+        development_invitation_connected: invitation_token
+            .as_ref()
+            .map(|token| token.is_some())
+            .unwrap_or(false),
         development_invitation_has_access: bundle.development_invitation_has_access,
     };
 
@@ -332,8 +340,12 @@ fn version_options(
             &manifest.version,
             installed_version,
             is_current_latest,
+            release.channel.as_deref().unwrap_or_else(|| channel_for_version(&version)),
         );
-        let channel = channel_for_version(&version).to_string();
+        let channel = release
+            .channel
+            .clone()
+            .unwrap_or_else(|| channel_for_version(&version).to_string());
         options.push(VersionOption {
             version,
             label,
@@ -380,19 +392,21 @@ fn version_option_action_label(
     latest_version: &str,
     installed_version: Option<&str>,
     is_current_latest: bool,
+    channel: &str,
 ) -> String {
-    if channel_for_version(version) == "dev" {
+    if matches!(channel, "dev" | "private") {
+        let label = if channel == "private" { "private" } else { "development" };
         return match installed_version {
-            Some(current) if current == version => "Reinstall this development build".to_string(),
+            Some(current) if current == version => format!("Reinstall this {label} build"),
             Some(current) => match version_cmp(version, current) {
                 Ordering::Greater if is_current_latest => {
-                    "Install latest development build".to_string()
+                    format!("Install latest {label} build")
                 }
-                Ordering::Greater => "Install selected development build".to_string(),
-                Ordering::Less => "Roll back to development build".to_string(),
-                Ordering::Equal => "Install selected development build".to_string(),
+                Ordering::Greater => format!("Install selected {label} build"),
+                Ordering::Less => format!("Roll back to {label} build"),
+                Ordering::Equal => format!("Install selected {label} build"),
             },
-            None => "Install selected development build".to_string(),
+            None => format!("Install selected {label} build"),
         };
     }
     let installed_newer_than_target = installed_version
@@ -587,6 +601,7 @@ fn collect_releases(manifest: &PluginManifest) -> Vec<PluginRelease> {
     let mut releases = Vec::with_capacity(1 + manifest.available_versions.len());
     releases.push(PluginRelease {
         version: manifest.version.clone(),
+        channel: manifest.channel.clone().or_else(|| Some(channel_for_version(&manifest.version).to_string())),
         release_date: manifest.release_date.clone(),
         release_notes_url: manifest.release_notes_url.clone(),
         release_highlights: manifest.release_highlights.clone(),
@@ -789,6 +804,7 @@ fn overlay_development_catalog(
     catalog: crate::development::ValidatedDevelopmentCatalog,
 ) {
     let warnings = catalog.warnings.clone();
+    let private_plugin_icons = catalog.private_plugin_icons.clone();
     let by_plugin = crate::development::releases_by_plugin(catalog);
     for (plugin_id, development_releases) in by_plugin {
         if development_releases.is_empty() {
@@ -851,8 +867,8 @@ fn overlay_development_catalog(
 
         let target = candidates
             .iter()
-            .filter(|candidate| candidate.channel == "dev")
-            .max_by(|left, right| version_cmp(&left.release.version, &right.release.version))
+            .filter(|candidate| matches!(candidate.channel.as_str(), "dev" | "private"))
+            .max_by(|left, right| compare_channel_releases(left, right))
             .cloned()
             .or_else(|| candidates.into_iter().max_by(compare_channel_releases));
         let Some(target) = target else {
@@ -883,10 +899,12 @@ fn overlay_development_catalog(
                 .as_ref()
                 .map(|manifest| manifest.display_name.clone())
                 .unwrap_or_else(|| development_name.clone()),
-            icon_url: existing
-                .as_ref()
-                .and_then(|manifest| manifest.icon_url.clone()),
+            icon_url: private_plugin_icons
+                .get(&plugin_id)
+                .cloned()
+                .or_else(|| existing.as_ref().and_then(|manifest| manifest.icon_url.clone())),
             version: target.release.version.clone(),
+            channel: Some(target.channel.clone()),
             release_date: target.release.release_date.clone(),
             release_notes_url: target.release.release_notes_url.clone(),
             release_highlights: target.release.release_highlights.clone(),
@@ -917,7 +935,7 @@ fn overlay_development_catalog(
                 manifest_url: String::new(),
                 stable_manifest_url: None,
                 beta_manifest_url: None,
-                icon_url: None,
+                icon_url: private_plugin_icons.get(&plugin_id).cloned(),
                 access_mode: Some(crate::models::catalog_access_mode(
                     &plugin_id,
                     existing
@@ -958,6 +976,7 @@ fn channel_priority(channel: &str) -> u8 {
         "stable" => 0,
         "beta" => 1,
         "dev" => 2,
+        "private" => 3,
         _ => u8::MAX,
     }
 }
@@ -1012,6 +1031,7 @@ fn merge_beta_manifest(
 
     merged_versions.push(PluginRelease {
         version: stable_manifest.version.clone(),
+        channel: Some("stable".to_string()),
         release_date: stable_manifest.release_date.clone(),
         release_notes_url: stable_manifest.release_notes_url.clone(),
         release_highlights: stable_manifest.release_highlights.clone(),
@@ -1034,6 +1054,7 @@ fn merge_beta_manifest(
     }
 
     beta_manifest.available_versions = merged_versions;
+    beta_manifest.channel = Some("beta".to_string());
     beta_manifest
 }
 
@@ -1309,6 +1330,7 @@ mod tests {
     fn test_release(version: &str) -> PluginRelease {
         PluginRelease {
             version: version.to_string(),
+            channel: None,
             release_date: "2026-03-30T00:00:00Z".to_string(),
             release_notes_url: format!("https://example.com/releases/{version}"),
             release_highlights: None,
@@ -1323,6 +1345,7 @@ mod tests {
             display_name: "Example Plugin".to_string(),
             icon_url: None,
             version: version.to_string(),
+            channel: None,
             release_date: "2026-03-30T00:00:00Z".to_string(),
             release_notes_url: format!("https://example.com/releases/{version}"),
             release_highlights: None,
@@ -1415,6 +1438,7 @@ mod tests {
             crate::development::ValidatedDevelopmentCatalog {
                 email: None,
                 plugin_grants: None,
+                private_plugin_icons: HashMap::new(),
                 releases: Vec::new(),
                 warnings: vec!["Ignored an unrecognized development grant.".to_string()],
             },
@@ -1461,6 +1485,7 @@ mod tests {
             crate::development::ValidatedDevelopmentCatalog {
                 email: None,
                 plugin_grants: None,
+                private_plugin_icons: HashMap::new(),
                 releases: vec![published, retired],
                 warnings: Vec::new(),
             },
@@ -1472,6 +1497,54 @@ mod tests {
             .available_versions
             .iter()
             .any(|release| release.version == "1.8.0-dev.2"));
+    }
+
+    #[test]
+    fn private_release_keeps_its_channel_for_numeric_version_options() {
+        let mut private = crate::development::ValidatedDevelopmentRelease {
+            plugin_slug: "bgrade".to_string(),
+            plugin_name: "B-Grade".to_string(),
+            access_mode: Some("licensed".to_string()),
+            license_url: None,
+            channel: "private".to_string(),
+            state: "published".to_string(),
+            keep_for_rollback: false,
+            release: test_release("0.1.0"),
+        };
+        private.release.channel = Some("private".to_string());
+        for package in &mut private.release.platforms {
+            package.bundle_name = "BGrade.ofx.bundle".to_string();
+            package.bundle_identifier = "com.moazelgabry.bgrade".to_string();
+            package.protected_artifact_id = Some(3);
+        }
+
+        let mut bundle = CatalogBundle {
+            source: "remote".to_string(),
+            source_label: DEFAULT_CATALOG_URL.to_string(),
+            entries: Vec::new(),
+            manifests: HashMap::new(),
+            beta_plugins: HashSet::new(),
+            release_channels: HashMap::new(),
+            development_warning: None,
+            development_invitation_has_access: Some(true),
+        };
+        overlay_development_catalog(
+            &mut bundle,
+            crate::development::ValidatedDevelopmentCatalog {
+                email: None,
+                plugin_grants: Some(vec!["bgrade".to_string()]),
+                private_plugin_icons: HashMap::new(),
+                releases: vec![private],
+                warnings: Vec::new(),
+            },
+        );
+
+        assert_eq!(bundle.release_channels.get("bgrade").map(String::as_str), Some("private"));
+        let manifest = bundle.manifests.get("bgrade").unwrap();
+        assert_eq!(manifest.channel.as_deref(), Some("private"));
+        let options = version_options(manifest, Some("0.1.0"));
+        assert_eq!(options[0].channel, "private");
+        assert_eq!(options[0].action_label, "Reinstall this private build");
     }
 
     #[test]

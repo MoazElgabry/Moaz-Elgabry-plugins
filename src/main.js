@@ -1014,7 +1014,7 @@ function diagnosticsAvailable(plugin) {
 }
 
 function pluginNameMarkup(plugin) {
-  const developmentBuild = plugin.releaseChannel === "dev";
+  const developmentBuild = plugin.releaseChannel === "dev" || plugin.releaseChannel === "private";
   const developmentReceiptStatus = plugin.developmentReceiptStatus ?? "inactive";
   const access = plugin.accessMode === "licensed" && !developmentBuild
     ? accessForProduct(plugin.pluginId)
@@ -1029,6 +1029,7 @@ function pluginNameMarkup(plugin) {
     ${plugin.accessMode === "licensed" && !developmentBuild ? `<span class="plugin-channel-tag plugin-access-tag" data-access-status="${escapeHtml(accessStatus)}">${escapeHtml(accessStatusLabel(accessStatus))}</span>` : ""}
     ${plugin.accessMode === "unknown" ? '<span class="plugin-channel-tag plugin-access-unknown-tag">Access setup needed</span>' : ""}
     ${plugin.releaseChannel === "dev" ? '<span class="plugin-channel-tag plugin-dev-tag">Development</span>' : ""}
+    ${plugin.releaseChannel === "private" ? '<span class="plugin-channel-tag plugin-dev-tag">Private</span>' : ""}
     ${plugin.betaRelease ? '<span class="plugin-channel-tag plugin-beta-tag">Beta</span>' : ""}
   `;
 }
@@ -1278,7 +1279,7 @@ function accessExpiryLabel(expiresAt) {
 }
 
 function pluginAccessMarkup(plugin) {
-  if (plugin.accessMode !== "licensed" || plugin.releaseChannel === "dev") return "";
+  if (plugin.accessMode !== "licensed" || ["dev", "private"].includes(plugin.releaseChannel)) return "";
   const access = accessForProduct(plugin.pluginId);
   const status = access?.status ?? "not_activated";
   const activated = access?.licenses?.length > 0;
@@ -1354,7 +1355,7 @@ async function updateDevelopmentBuildsPreference(enabled) {
 async function activateDevelopmentReceiptsForCatalog() {
   const plugins = (state.dashboard?.plugins ?? [])
     .filter((plugin) =>
-      plugin.accessMode === "licensed" && plugin.releaseChannel === "dev")
+      plugin.accessMode === "licensed" && ["dev", "private"].includes(plugin.releaseChannel))
     .filter((plugin) => Boolean(plugin.pluginId));
   const isCatalogRefresh = state.activeOperation?.kind === "catalog";
   const invitationConnected = Boolean(state.dashboard?.manager?.developmentInvitationConnected);
@@ -1919,7 +1920,7 @@ async function submitLicenseActivation(event) {
 
 async function refreshLicenseAccess() {
   const products = (state.dashboard?.plugins ?? [])
-    .filter((plugin) => plugin.accessMode === "licensed" && plugin.releaseChannel !== "dev")
+    .filter((plugin) => plugin.accessMode === "licensed" && !["dev", "private"].includes(plugin.releaseChannel))
     .map((plugin) => plugin.pluginId);
   try {
     state.access = await invoke("refresh_access", { productSlugs: products });
