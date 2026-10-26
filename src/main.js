@@ -368,16 +368,15 @@ function applyReleaseControlState() {
     elements.invitationAccessEmail.textContent = invitationConnected || invitationRequestActive ? state.invitation.email : "";
   }
   if (elements.invitationAccessCopy) {
-    const developmentWarning = state.dashboard?.developmentWarning?.trim();
     elements.invitationAccessCopy.classList.toggle(
       "hidden",
-      invitationConnected && !invitationHasNoPluginAccess && !developmentWarning
+      invitationConnected && !invitationHasNoPluginAccess
     );
     elements.invitationAccessCopy.classList.toggle("invitation-access-copy--revoked", invitationHasNoPluginAccess);
     elements.invitationAccessCopy.textContent = invitationConnected
       ? invitationHasNoPluginAccess
         ? "Access to all plugins has been revoked. Contact support@moazelgabry.com if you need help."
-        : developmentWarning ?? ""
+        : ""
       : state.invitation.status === "verification_required"
         ? "Enter the verification code we emailed to finish your request."
         : state.invitation.status === "approved_key_confirmation"
@@ -529,7 +528,7 @@ function showAlert(errorLike, fallbackSummary) {
       : parseUiError(errorLike, fallbackSummary);
 
   elements.alertSummary.textContent = payload.summary;
-  elements.alertLabel.textContent = payload.type === "info" ? "Information" : "Attention";
+  elements.alertLabel.textContent = payload.label ?? (payload.type === "info" ? "Information" : "Attention");
   const hasDetails = Boolean(payload.details) && payload.details !== payload.summary;
   elements.alertMessage.textContent = payload.details ?? "";
   elements.alertDetails.classList.toggle("hidden", !hasDetails);
@@ -1317,6 +1316,34 @@ function renderDashboard() {
   elements.updaterStatus.textContent = manager.updaterConfigured ? "Configured" : "Not configured";
   applyReleaseControlState();
   renderPlugins();
+  showDevelopmentCatalogWarning();
+}
+
+function showDevelopmentCatalogWarning() {
+  const warning = state.dashboard?.developmentWarning?.trim();
+  if (!warning || !state.dashboard?.manager?.developmentInvitationConnected) return;
+
+  const catalogFailurePrefix =
+    "Development builds could not be refreshed. Public stable and beta releases remain available. ";
+  const receiptSyncPrefix =
+    "The invitation was refreshed, but local development receipts could not be synchronized: ";
+  let summary = "Development access needs attention.";
+  let details = warning;
+
+  if (warning.startsWith(catalogFailurePrefix)) {
+    summary = catalogFailurePrefix.trim();
+    details = warning.slice(catalogFailurePrefix.length).trim() || warning;
+  } else if (warning.startsWith(receiptSyncPrefix)) {
+    summary = "The invitation refreshed, but local development receipts could not be synchronized.";
+    details = warning.slice(receiptSyncPrefix.length).trim() || warning;
+  }
+
+  showAlert({
+    summary,
+    details,
+    code: "development_catalog_warning",
+    label: "Development access"
+  });
 }
 
 async function updateBetaReleasesPreference(enabled) {
@@ -1379,7 +1406,9 @@ async function activateDevelopmentReceiptsForCatalog() {
     } catch {
       plugin.developmentReceiptStatus = "unknown";
     }
-    if (plugin.developmentReceiptStatus !== "active") {
+    if (plugin.developmentReceiptStatus === "active") {
+      activatedDevelopmentProducts.add(plugin.pluginId);
+    } else {
       activatedDevelopmentProducts.delete(plugin.pluginId);
     }
     completedChecks += 1;

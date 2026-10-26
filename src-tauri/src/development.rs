@@ -56,9 +56,34 @@ struct DevelopmentCatalogResponse {
     email: Option<String>,
     #[serde(default)]
     plugin_grants: Option<Vec<String>>,
-    #[serde(default)]
+    // Older WordPress responses serialize an empty PHP array as `[]` even
+    // though this field is a map when populated. Accept only that empty
+    // legacy form; non-empty arrays remain invalid.
+    #[serde(default, deserialize_with = "deserialize_plugin_icons")]
     plugin_icons: HashMap<String, String>,
     releases: Vec<DevelopmentRelease>,
+}
+
+fn deserialize_plugin_icons<'de, D>(
+    deserializer: D,
+) -> std::result::Result<HashMap<String, String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum PluginIcons {
+        Object(HashMap<String, String>),
+        Sequence(Vec<serde::de::IgnoredAny>),
+    }
+
+    match PluginIcons::deserialize(deserializer)? {
+        PluginIcons::Object(icons) => Ok(icons),
+        PluginIcons::Sequence(icons) if icons.is_empty() => Ok(HashMap::new()),
+        PluginIcons::Sequence(_) => Err(serde::de::Error::custom(
+            "plugin_icons must be an object or an empty array",
+        )),
+    }
 }
 
 #[derive(Debug, Deserialize)]

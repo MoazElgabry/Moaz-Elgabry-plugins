@@ -701,7 +701,7 @@ async fn load_catalog_bundle(
                 format!("{error} Public stable and beta releases remain available.")
             } else {
                 format!(
-                    "Development builds could not be refreshed. Public stable and beta releases remain available. {error}"
+                    "Development builds could not be refreshed. Public stable and beta releases remain available. {error:#}"
                 )
             });
         }
