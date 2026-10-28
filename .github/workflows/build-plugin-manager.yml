@@ -322,14 +322,15 @@ jobs:
           const release = JSON.parse(fs.readFileSync('release-after-upload.json', 'utf8'));
           const names = new Set((release.assets ?? []).map((asset) => asset.name));
           const version = process.env.APP_VERSION;
+          // GitHub normalizes spaces in release asset names to periods.
           const required = [
-            `Moaz Elgabry Plugins_${version}_x64-setup.exe`,
-            `Moaz Elgabry Plugins_${version}_x64-setup.exe.sig`,
-            `Moaz Elgabry Plugins_${version}_amd64.AppImage`,
-            `Moaz Elgabry Plugins_${version}_amd64.AppImage.sig`,
-            `Moaz Elgabry Plugins_${version}_universal.dmg`,
-            'Moaz Elgabry Plugins_universal.app.tar.gz',
-            'Moaz Elgabry Plugins_universal.app.tar.gz.sig'
+            `Moaz.Elgabry.Plugins_${version}_x64-setup.exe`,
+            `Moaz.Elgabry.Plugins_${version}_x64-setup.exe.sig`,
+            `Moaz.Elgabry.Plugins_${version}_amd64.AppImage`,
+            `Moaz.Elgabry.Plugins_${version}_amd64.AppImage.sig`,
+            `Moaz.Elgabry.Plugins_${version}_universal.dmg`,
+            'Moaz.Elgabry.Plugins.app.tar.gz',
+            'Moaz.Elgabry.Plugins.app.tar.gz.sig'
           ];
           const missing = required.filter((name) => !names.has(name));
           if (!release.draft || missing.length) {
