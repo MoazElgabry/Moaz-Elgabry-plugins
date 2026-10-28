@@ -277,7 +277,7 @@ jobs:
           const windows = exactlyOne(files, (file) => path.basename(file) === `Moaz Elgabry Plugins_${version}_x64-setup.exe`, 'Windows installer');
           const linux = exactlyOne(files, (file) => path.basename(file) === `Moaz Elgabry Plugins_${version}_amd64.AppImage`, 'Linux AppImage');
           const macDmg = exactlyOne(files, (file) => path.basename(file) === `Moaz Elgabry Plugins_${version}_universal.dmg`, 'macOS DMG');
-          const macUpdater = exactlyOne(files, (file) => path.basename(file) === 'Moaz Elgabry Plugins_universal.app.tar.gz', 'macOS updater archive');
+          const macUpdater = exactlyOne(files, (file) => path.basename(file) === 'Moaz Elgabry Plugins.app.tar.gz', 'macOS updater archive');
           const required = [
             path.basename(windows),
             `${path.basename(windows)}.sig`,
