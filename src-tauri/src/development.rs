@@ -471,27 +471,37 @@ pub async fn download_protected_artifact(
         anyhow!("Connect a development invitation before downloading this build.")
     })?;
     let client = production_client()?;
+    let request_id = uuid::Uuid::new_v4().to_string();
     progress.update(Some(10), "Requesting protected package", None);
     let response = client
         .post(format!("{DEV_API_BASE}/download-tickets"))
         .bearer_auth(&token)
+        .header("X-Moaz-Request-ID", &request_id)
         .json(&DownloadTicketRequest { artifact_id })
         .send()
         .await
         .context("Failed to request a protected download ticket")?;
-    let response = require_development_success(response, DevelopmentRequestStage::Ticket).await?;
+    let response =
+        require_development_success(response, DevelopmentRequestStage::Ticket, &request_id).await?;
     let ticket = response
         .json::<DownloadTicketResponse>()
         .await
         .context("The protected download ticket response was invalid")?;
 
     let download_url = ticket_download_url(&ticket.download_path, artifact_id, &ticket.ticket)?;
-    let request = build_ticket_download_request(&client, download_url)?;
+    let mut request = build_ticket_download_request(&client, download_url)?;
+    request.headers_mut().insert(
+        reqwest::header::HeaderName::from_static("x-moaz-request-id"),
+        reqwest::header::HeaderValue::from_bytes(request_id.as_bytes())
+            .context("Failed to prepare the protected artifact request reference")?,
+    );
     let response = client
         .execute(request)
         .await
         .context("Failed to download the protected development artifact")?;
-    let response = require_development_success(response, DevelopmentRequestStage::Artifact).await?;
+    let response =
+        require_development_success(response, DevelopmentRequestStage::Artifact, &request_id)
+            .await?;
     progress
         .download_response(response, 12, 70, "Downloading plugin package")
         .await
@@ -507,38 +517,99 @@ enum DevelopmentRequestStage {
 async fn require_development_success(
     response: Response,
     stage: DevelopmentRequestStage,
+    request_id: &str,
 ) -> Result<Response> {
     let status = response.status();
     if status.is_success() {
         return Ok(response);
     }
 
-    // Read only the structured WordPress error message, then map known values
-    // to fixed diagnostic codes. Never echo a response body, URL, or request
-    // credential into the UI error chain.
+    // Parse only the structured WordPress error code. Never echo a response
+    // body, message, URL, or request credential into the UI error chain.
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_ascii_lowercase();
     let response_body = limited_error_body(response, 16 * 1024).await;
-    let server_message = serde_json::from_slice::<serde_json::Value>(&response_body)
+    let server_code = serde_json::from_slice::<serde_json::Value>(&response_body)
         .ok()
-        .and_then(|body| body.get("message")?.as_str().map(str::to_owned));
-    let code = match (stage, server_message.as_deref()) {
-        (_, Some("A bearer invitation key is required.")) => "PM-DEV-KEY-MISSING",
-        (_, Some("Invitation key is invalid, expired, or revoked.")) => "PM-DEV-KEY-REJECTED",
-        (DevelopmentRequestStage::Ticket, Some("Artifact access is unavailable or revoked.")) => {
-            "PM-DEV-ARTIFACT-DENIED"
+        .and_then(|body| body.get("code")?.as_str().map(str::to_owned));
+    let (code, safe_server_code) = match (stage, server_code.as_deref()) {
+        (_, Some("moaz_er_invitation_key_required")) => {
+            ("PM-DEV-KEY-MISSING", "moaz_er_invitation_key_required")
         }
-        (DevelopmentRequestStage::Artifact, Some("Protected download was rejected.")) => {
-            "PM-DEV-DOWNLOAD-DENIED"
+        (_, Some("moaz_er_invitation_rejected")) => {
+            ("PM-DEV-KEY-REJECTED", "moaz_er_invitation_rejected")
+        }
+        (DevelopmentRequestStage::Ticket, Some("moaz_er_artifact_access_denied")) => {
+            ("PM-DEV-ARTIFACT-DENIED", "moaz_er_artifact_access_denied")
+        }
+        (DevelopmentRequestStage::Artifact, Some("moaz_er_download_ticket_rejected")) => {
+            ("PM-DEV-DOWNLOAD-DENIED", "moaz_er_download_ticket_rejected")
+        }
+        (DevelopmentRequestStage::Artifact, Some("moaz_er_protected_download_failed")) => (
+            "PM-DEV-DOWNLOAD-SERVER-ERROR",
+            "moaz_er_protected_download_failed",
+        ),
+        (DevelopmentRequestStage::Ticket, Some("moaz_er_ticket_issue_failed")) => {
+            ("PM-DEV-TICKET-SERVER-ERROR", "moaz_er_ticket_issue_failed")
+        }
+        (
+            DevelopmentRequestStage::Ticket,
+            Some("rest_forbidden" | "rest_cannot_access" | "rest_cookie_invalid_nonce"),
+        ) => ("PM-DEV-TICKET-WP-REST-DENIED", "wordpress_rest_denied"),
+        (
+            DevelopmentRequestStage::Artifact,
+            Some("rest_forbidden" | "rest_cannot_access" | "rest_cookie_invalid_nonce"),
+        ) => ("PM-DEV-DOWNLOAD-WP-REST-DENIED", "wordpress_rest_denied"),
+        (DevelopmentRequestStage::Ticket, _)
+            if status == StatusCode::FORBIDDEN && !content_type.contains("json") =>
+        {
+            ("PM-DEV-TICKET-NON-JSON-403", "non_json_forbidden")
+        }
+        (DevelopmentRequestStage::Artifact, _)
+            if status == StatusCode::FORBIDDEN && !content_type.contains("json") =>
+        {
+            ("PM-DEV-DOWNLOAD-NON-JSON-403", "non_json_forbidden")
         }
         (DevelopmentRequestStage::Ticket, _) if status == StatusCode::FORBIDDEN => {
-            "PM-DEV-TICKET-FORBIDDEN"
+            ("PM-DEV-TICKET-UNCLASSIFIED-403", "unclassified_forbidden")
         }
         (DevelopmentRequestStage::Artifact, _) if status == StatusCode::FORBIDDEN => {
-            "PM-DEV-DOWNLOAD-FORBIDDEN"
+            ("PM-DEV-DOWNLOAD-UNCLASSIFIED-403", "unclassified_forbidden")
         }
-        (DevelopmentRequestStage::Ticket, _) => "PM-DEV-TICKET-HTTP-ERROR",
-        (DevelopmentRequestStage::Artifact, _) => "PM-DEV-DOWNLOAD-HTTP-ERROR",
+        (DevelopmentRequestStage::Ticket, _) => {
+            ("PM-DEV-TICKET-HTTP-ERROR", "unclassified_http_error")
+        }
+        (DevelopmentRequestStage::Artifact, _) => {
+            ("PM-DEV-DOWNLOAD-HTTP-ERROR", "unclassified_http_error")
+        }
     };
-    bail!("{code} HTTP-{}", status.as_u16())
+    let safe_server_code = if matches!(
+        safe_server_code,
+        "unclassified_forbidden" | "unclassified_http_error"
+    ) {
+        server_code
+            .as_deref()
+            .filter(|value| {
+                !value.is_empty()
+                    && value.len() <= 80
+                    && value
+                        .bytes()
+                        .all(|byte| {
+                            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_'
+                        })
+            })
+            .unwrap_or(safe_server_code)
+    } else {
+        safe_server_code
+    };
+    bail!(
+        "{code} HTTP-{} SERVER-CODE-{safe_server_code} REQUEST-ID-{request_id}",
+        status.as_u16()
+    )
 }
 
 async fn limited_error_body(mut response: Response, limit: usize) -> Vec<u8> {

@@ -342,7 +342,18 @@ impl UiError {
 fn safe_diagnostic_details(code: &str, raw_details: &str) -> String {
     let diagnostic = raw_details
         .split_whitespace()
-        .filter(|part| part.starts_with("PM-") || part.starts_with("HTTP-"))
+        .filter(|part| {
+            ["PM-", "HTTP-", "SERVER-CODE-", "REQUEST-ID-"]
+                .iter()
+                .any(|prefix| {
+                    part.strip_prefix(prefix).is_some_and(|value| {
+                        !value.is_empty()
+                            && value.bytes().all(|byte| {
+                                byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')
+                            })
+                    })
+                })
+        })
         .collect::<Vec<_>>();
     let reference = if diagnostic.is_empty() {
         format!("PM-{}", code.replace('_', "-").to_ascii_uppercase())
@@ -395,10 +406,59 @@ fn classify_error<'a>(
         );
     }
 
+    if details.contains("PM-DEV-TICKET-WP-REST-DENIED") {
+        return (
+            "development_ticket_rest_denied",
+            "WordPress REST access control blocked the ticket request before invitation access could be checked. Share the troubleshooting code with support.",
+        );
+    }
+
+    if details.contains("PM-DEV-TICKET-NON-JSON-403") {
+        return (
+            "development_ticket_upstream_forbidden",
+            "A server or security layer denied the ticket request before WordPress returned its normal API response. Share the troubleshooting code with support.",
+        );
+    }
+
+    if details.contains("PM-DEV-TICKET-UNCLASSIFIED-403") {
+        return (
+            "development_ticket_unclassified_forbidden",
+            "The ticket request received an unrecognized 403 response. The request reference can be matched against WordPress activity if the request reached the plugin.",
+        );
+    }
+
+    if details.contains("PM-DEV-TICKET-SERVER-ERROR") {
+        return (
+            "development_ticket_server_error",
+            "WordPress could not issue a protected download ticket. Share the troubleshooting code with support.",
+        );
+    }
+
     if details.contains("PM-DEV-DOWNLOAD-FORBIDDEN") {
         return (
             "development_download_forbidden",
             "The server denied the protected artifact download. The response did not identify a recognized ticket or artifact denial.",
+        );
+    }
+
+    if details.contains("PM-DEV-DOWNLOAD-WP-REST-DENIED") {
+        return (
+            "development_download_rest_denied",
+            "WordPress REST access control blocked the protected artifact request. Share the troubleshooting code with support.",
+        );
+    }
+
+    if details.contains("PM-DEV-DOWNLOAD-SERVER-ERROR") {
+        return (
+            "development_download_server_error",
+            "WordPress could not deliver the protected artifact. Share the troubleshooting code with support.",
+        );
+    }
+
+    if details.contains("PM-DEV-DOWNLOAD-NON-JSON-403") {
+        return (
+            "development_download_upstream_forbidden",
+            "A server or security layer denied the protected artifact request before WordPress returned its normal API response. Share the troubleshooting code with support.",
         );
     }
 
