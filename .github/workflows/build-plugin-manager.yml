@@ -70,6 +70,9 @@ jobs:
         run: |
           $tag = "plugin-manager-v$env:APP_VERSION"
           $releasesJson = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100"
+          if ($LASTEXITCODE -ne 0) {
+            throw "GitHub release lookup failed with exit code $LASTEXITCODE."
+          }
           $releases = $releasesJson | ConvertFrom-Json
           $release = $releases | Where-Object { $_.tag_name -eq $tag } | Select-Object -First 1
           if (-not $release) {
@@ -80,9 +83,15 @@ jobs:
               --field target_commitish="$env:GITHUB_SHA" `
               --field name="Moaz Elgabry Plugins v$env:APP_VERSION" `
               --field body="See the release assets for desktop build artifacts." `
-              --raw-field draft=true `
-              --raw-field prerelease=false
+              --field draft=true `
+              --field prerelease=false
+            if ($LASTEXITCODE -ne 0) {
+              throw "GitHub rejected draft creation for $tag with exit code $LASTEXITCODE."
+            }
             $createdRelease = $createdReleaseJson | ConvertFrom-Json
+            if (-not $createdRelease -or $createdRelease.tag_name -ne $tag -or -not $createdRelease.draft) {
+              throw "GitHub did not return the expected draft release for $tag."
+            }
             "release_tag=$tag" >> $env:GITHUB_OUTPUT
             "should_build=true" >> $env:GITHUB_OUTPUT
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Created draft release shell for $tag."
