@@ -33,6 +33,7 @@ jobs:
     outputs:
       app_version: ${{ steps.version.outputs.app_version }}
       release_tag: ${{ steps.release_guard.outputs.release_tag }}
+      release_id: ${{ steps.release_guard.outputs.release_id }}
       should_build: ${{ steps.release_guard.outputs.should_build }}
     steps:
       - uses: actions/checkout@v5
@@ -93,6 +94,7 @@ jobs:
               throw "GitHub did not return the expected draft release for $tag."
             }
             "release_tag=$tag" >> $env:GITHUB_OUTPUT
+            "release_id=$($createdRelease.id)" >> $env:GITHUB_OUTPUT
             "should_build=true" >> $env:GITHUB_OUTPUT
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Created draft release shell for $tag."
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
@@ -103,6 +105,7 @@ jobs:
           $releaseUrl = if ($release.html_url) { $release.html_url } else { "https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$tag" }
           $assetCount = @($release.assets).Count
           "release_tag=$tag" >> $env:GITHUB_OUTPUT
+          "release_id=$($release.id)" >> $env:GITHUB_OUTPUT
           if ($release.draft) {
             "should_build=true" >> $env:GITHUB_OUTPUT
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Reusing the draft release for $tag. The final publish job will replace matching assets with the complete platform set."
@@ -315,17 +318,37 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ needs.prepare_release.outputs.release_tag }}
+          RELEASE_ID: ${{ needs.prepare_release.outputs.release_id }}
           APP_VERSION: ${{ needs.prepare_release.outputs.app_version }}
         run: |
           set -euo pipefail
-          release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}")"
+          release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}")"
+          if [[ "$(jq -r '.tag_name' <<<"$release_json")" != "$RELEASE_TAG" ]]; then
+            echo "Release ID ${RELEASE_ID} does not match expected tag ${RELEASE_TAG}."
+            exit 1
+          fi
           if [[ "$(jq -r '.draft' <<<"$release_json")" != "true" ]]; then
             echo "The target release is not a draft; refusing to replace assets."
             exit 1
           fi
-          mapfile -d '' assets < <(find release-assets -type f -print0)
-          gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
-          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" > release-after-upload.json
+          upload_url="$(jq -r '.upload_url' <<<"$release_json" | sed 's/{?name,label}$//')"
+          while IFS= read -r -d '' file; do
+            asset_name="$(basename "$file")"
+            existing_asset_id="$(jq -r --arg name "$asset_name" '.assets[]? | select(.name == $name) | .id' <<<"$release_json" | head -n 1)"
+            if [[ -n "$existing_asset_id" ]]; then
+              gh api "repos/${GITHUB_REPOSITORY}/releases/assets/${existing_asset_id}" --method DELETE
+            fi
+            encoded_name="$(jq -rn --arg name "$asset_name" '$name | @uri')"
+            curl --fail-with-body --silent --show-error --location \
+              --request POST \
+              --header "Authorization: Bearer ${GH_TOKEN}" \
+              --header "Accept: application/vnd.github+json" \
+              --header "Content-Type: application/octet-stream" \
+              --data-binary "@${file}" \
+              "${upload_url}?name=${encoded_name}" > /dev/null
+            echo "Uploaded ${asset_name} to draft ${RELEASE_TAG}."
+          done < <(find release-assets -type f -print0)
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" > release-after-upload.json
           node <<'NODE'
           const fs = require('node:fs');
           const release = JSON.parse(fs.readFileSync('release-after-upload.json', 'utf8'));
