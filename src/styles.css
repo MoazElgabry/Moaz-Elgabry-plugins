@@ -1860,9 +1860,9 @@ button.primary.plugin-install-action:hover:not(:disabled) {
 }
 
 .plugin-invitation-access-tag {
-  border-color: rgba(164, 174, 185, 0.25);
-  background: rgba(134, 145, 156, 0.12);
-  color: #b3bac1;
+  border-color: rgba(218, 117, 112, 0.4);
+  background: rgba(177, 78, 73, 0.18);
+  color: #f09a96;
 }
 
 .plugin-invitation-access-tag[data-receipt-status="active"] {

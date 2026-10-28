@@ -312,13 +312,14 @@ pub struct UiError {
 
 impl UiError {
     pub fn from_error(operation: &str, error: &Error) -> Self {
-        let details = error
+        let raw_details = error
             .chain()
             .map(|item| item.to_string())
             .collect::<Vec<_>>()
             .join("\nCaused by: ");
         let message = error.to_string();
-        let (code, summary) = classify_error(operation, &message, &details);
+        let (code, summary) = classify_error(operation, &message, &raw_details);
+        let details = safe_diagnostic_details(code, &raw_details);
 
         Self {
             code: code.to_string(),
@@ -338,11 +339,83 @@ impl UiError {
     }
 }
 
+fn safe_diagnostic_details(code: &str, raw_details: &str) -> String {
+    let diagnostic = raw_details
+        .split_whitespace()
+        .filter(|part| part.starts_with("PM-") || part.starts_with("HTTP-"))
+        .collect::<Vec<_>>();
+    let reference = if diagnostic.is_empty() {
+        format!("PM-{}", code.replace('_', "-").to_ascii_uppercase())
+    } else {
+        diagnostic.join(" ")
+    };
+
+    format!(
+        "Troubleshooting code: {reference}. Share this code with support; it contains no invitation key, email address, URL, or local file path."
+    )
+}
+
 fn classify_error<'a>(
     operation: &'a str,
     message: &'a str,
     details: &'a str,
 ) -> (&'a str, &'a str) {
+    if details.contains("PM-DEV-KEY-MISSING") {
+        return (
+            "development_key_missing",
+            "No invitation key was sent with this request. Reconnect the invitation in Plugin Manager.",
+        );
+    }
+
+    if details.contains("PM-DEV-KEY-REJECTED") {
+        return (
+            "development_key_rejected",
+            "WordPress rejected the saved invitation key. Reconnect using the current key.",
+        );
+    }
+
+    if details.contains("PM-DEV-ARTIFACT-DENIED") {
+        return (
+            "development_artifact_denied",
+            "The invitation was accepted, but WordPress denied access to this artifact. Check the invitation’s project access and the release’s availability.",
+        );
+    }
+
+    if details.contains("PM-DEV-DOWNLOAD-DENIED") {
+        return (
+            "development_download_denied",
+            "WordPress rejected the protected artifact download after issuing a ticket. The ticket or artifact authorization may have expired or changed.",
+        );
+    }
+
+    if details.contains("PM-DEV-TICKET-FORBIDDEN") {
+        return (
+            "development_ticket_forbidden",
+            "The server denied the protected download-ticket request. The response did not identify a recognized invitation or artifact denial.",
+        );
+    }
+
+    if details.contains("PM-DEV-DOWNLOAD-FORBIDDEN") {
+        return (
+            "development_download_forbidden",
+            "The server denied the protected artifact download. The response did not identify a recognized ticket or artifact denial.",
+        );
+    }
+
+    if details.contains("PM-DEV-TICKET-HTTP-ERROR") {
+        return (
+            "development_ticket_http_error",
+            "The server could not issue a protected download ticket.",
+        );
+    }
+
+    if details.contains("PM-DEV-DOWNLOAD-HTTP-ERROR") {
+        return (
+            "development_download_http_error",
+            "The protected development artifact could not be downloaded from the server.",
+        );
+    }
+
     if details.contains("Checksum mismatch") {
         return (
             "checksum_mismatch",

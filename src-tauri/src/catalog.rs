@@ -958,7 +958,13 @@ fn overlay_development_catalog(
         } else {
             bundle.beta_plugins.remove(&plugin_id);
         }
-        bundle.source = format!("{}+development", bundle.source);
+        if !bundle
+            .source
+            .split('+')
+            .any(|source| source == "development")
+        {
+            bundle.source = format!("{}+development", bundle.source);
+        }
     }
 
     if !warnings.is_empty() {

@@ -63,7 +63,9 @@ async fn activate_development_access(
 #[tauri::command]
 fn development_receipt_status(product_slug: String) -> Result<String, String> {
     access::development_receipt_status(product_slug.trim())
-        .map_err(|error| error.to_string())
+        .map_err(|error| {
+            models::UiError::from_error("development_receipt_status", &error).to_json_string()
+        })
 }
 
 #[tauri::command]
@@ -194,7 +196,10 @@ fn open_support_link() -> Result<(), String> {
     command
         .spawn()
         .map(|_| ())
-        .map_err(|error| format!("Failed to open support link: {error}"))
+        .map_err(|error| {
+            let error = anyhow::Error::from(error);
+            models::UiError::from_error("support_link", &error).to_json_string()
+        })
 }
 
 fn place_startup_window(window: &WebviewWindow) -> tauri::Result<()> {

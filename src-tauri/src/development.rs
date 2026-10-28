@@ -5,7 +5,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 use reqwest::header::AUTHORIZATION;
-use reqwest::{Client, Request, Url};
+use reqwest::{Client, Request, Response, StatusCode, Url};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -472,15 +472,15 @@ pub async fn download_protected_artifact(
     })?;
     let client = production_client()?;
     progress.update(Some(10), "Requesting protected package", None);
-    let ticket = client
+    let response = client
         .post(format!("{DEV_API_BASE}/download-tickets"))
         .bearer_auth(&token)
         .json(&DownloadTicketRequest { artifact_id })
         .send()
         .await
-        .context("Failed to request a protected download ticket")?
-        .error_for_status()
-        .context("Development artifact access is unavailable or was revoked")?
+        .context("Failed to request a protected download ticket")?;
+    let response = require_development_success(response, DevelopmentRequestStage::Ticket).await?;
+    let ticket = response
         .json::<DownloadTicketResponse>()
         .await
         .context("The protected download ticket response was invalid")?;
@@ -490,13 +490,69 @@ pub async fn download_protected_artifact(
     let response = client
         .execute(request)
         .await
-        .context("Failed to download the protected development artifact")?
-        .error_for_status()
-        .context("The protected development artifact could not be downloaded")?;
+        .context("Failed to download the protected development artifact")?;
+    let response = require_development_success(response, DevelopmentRequestStage::Artifact).await?;
     progress
         .download_response(response, 12, 70, "Downloading plugin package")
         .await
         .context("Failed to read the protected development artifact")
+}
+
+#[derive(Clone, Copy)]
+enum DevelopmentRequestStage {
+    Ticket,
+    Artifact,
+}
+
+async fn require_development_success(
+    response: Response,
+    stage: DevelopmentRequestStage,
+) -> Result<Response> {
+    let status = response.status();
+    if status.is_success() {
+        return Ok(response);
+    }
+
+    // Read only the structured WordPress error message, then map known values
+    // to fixed diagnostic codes. Never echo a response body, URL, or request
+    // credential into the UI error chain.
+    let response_body = limited_error_body(response, 16 * 1024).await;
+    let server_message = serde_json::from_slice::<serde_json::Value>(&response_body)
+        .ok()
+        .and_then(|body| body.get("message")?.as_str().map(str::to_owned));
+    let code = match (stage, server_message.as_deref()) {
+        (_, Some("A bearer invitation key is required.")) => "PM-DEV-KEY-MISSING",
+        (_, Some("Invitation key is invalid, expired, or revoked.")) => "PM-DEV-KEY-REJECTED",
+        (DevelopmentRequestStage::Ticket, Some("Artifact access is unavailable or revoked.")) => {
+            "PM-DEV-ARTIFACT-DENIED"
+        }
+        (DevelopmentRequestStage::Artifact, Some("Protected download was rejected.")) => {
+            "PM-DEV-DOWNLOAD-DENIED"
+        }
+        (DevelopmentRequestStage::Ticket, _) if status == StatusCode::FORBIDDEN => {
+            "PM-DEV-TICKET-FORBIDDEN"
+        }
+        (DevelopmentRequestStage::Artifact, _) if status == StatusCode::FORBIDDEN => {
+            "PM-DEV-DOWNLOAD-FORBIDDEN"
+        }
+        (DevelopmentRequestStage::Ticket, _) => "PM-DEV-TICKET-HTTP-ERROR",
+        (DevelopmentRequestStage::Artifact, _) => "PM-DEV-DOWNLOAD-HTTP-ERROR",
+    };
+    bail!("{code} HTTP-{}", status.as_u16())
+}
+
+async fn limited_error_body(mut response: Response, limit: usize) -> Vec<u8> {
+    let mut body = Vec::with_capacity(limit.min(4096));
+    while body.len() < limit {
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                let remaining = limit - body.len();
+                body.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+            }
+            Ok(None) | Err(_) => break,
+        }
+    }
+    body
 }
 
 fn production_client() -> Result<Client> {

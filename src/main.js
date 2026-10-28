@@ -521,6 +521,15 @@ function parseUiError(error, fallbackSummary = "The operation failed.") {
   };
 }
 
+function activityErrorSummary(parsed) {
+  const reference = parsed.details?.match(/Troubleshooting code: ([^.]+)\./)?.[1]?.trim();
+  if (reference) return `${parsed.summary} [${reference}]`;
+  const fallbackCode = String(parsed.code || "unknown")
+    .replaceAll("_", "-")
+    .toUpperCase();
+  return `${parsed.summary} [PM-${fallbackCode}]`;
+}
+
 function showAlert(errorLike, fallbackSummary) {
   const payload =
     typeof errorLike === "object" && errorLike?.summary
@@ -1357,7 +1366,7 @@ async function updateBetaReleasesPreference(enabled) {
     elements.betaToggle.checked = !enabled;
     const parsed = parseUiError(error, "Couldn't update beta release settings.");
     showAlert(parsed);
-    logActivity(`Beta release setting failed: ${parsed.summary}`);
+    logActivity(`Beta release setting failed: ${activityErrorSummary(parsed)}`);
   } finally {
     setBusy(false);
   }
@@ -1373,7 +1382,7 @@ async function updateDevelopmentBuildsPreference(enabled) {
   } catch (error) {
     const parsed = parseUiError(error, "Couldn't update development build settings.");
     showAlert(parsed);
-    logActivity(`Development build setting failed: ${parsed.summary}`);
+    logActivity(`Development build setting failed: ${activityErrorSummary(parsed)}`);
   } finally {
     setBusy(false);
   }
@@ -1441,7 +1450,7 @@ async function activateDevelopmentReceiptsForCatalog() {
       logActivity(`Development receipt activated for ${productSlug}.`);
     } catch (error) {
       const parsed = parseUiError(error, `Development receipt is unavailable for ${productSlug}.`);
-      logActivity(`Development receipt unavailable for ${productSlug}: ${parsed.summary}`);
+      logActivity(`Development receipt unavailable for ${productSlug}: ${activityErrorSummary(parsed)}`);
     }
     completedChecks += 1;
     reportAccessProgress(plugin?.displayName, "Receipt check complete");
@@ -1485,7 +1494,7 @@ async function connectDevelopmentInvitation() {
       elements.invitationConnectErrorDetails.classList.remove("hidden");
       elements.invitationConnectErrorDetails.open = false;
     }
-    logActivity(`Development invitation failed: ${parsed.summary}`);
+    logActivity(`Development invitation failed: ${activityErrorSummary(parsed)}`);
   } finally {
     setBusy(false);
   }
@@ -1520,7 +1529,7 @@ async function forgetDevelopmentInvitation() {
   } catch (error) {
     const parsed = parseUiError(error, "Couldn't forget the development invitation.");
     showAlert(parsed);
-    logActivity(`Forget invitation failed: ${parsed.summary}`);
+    logActivity(`Forget invitation failed: ${activityErrorSummary(parsed)}`);
   } finally {
     setBusy(false);
   }
@@ -1941,7 +1950,7 @@ async function submitLicenseActivation(event) {
     const parsed = parseUiError(error, "Couldn’t activate this license key.");
     elements.licenseKeyFeedback.textContent = parsed.summary;
     showAlert(parsed);
-    logActivity(`License activation failed: ${parsed.summary}`);
+    logActivity(`License activation failed: ${activityErrorSummary(parsed)}`);
   } finally {
     elements.licenseForm.querySelector('[type="submit"]').disabled = false;
   }
@@ -1990,7 +1999,7 @@ async function refreshDashboard() {
   } catch (error) {
     const parsed = parseUiError(error, "Couldn't refresh the plugin catalog right now.");
     showAlert(parsed);
-    logActivity(`Catalog refresh failed: ${parsed.summary}`);
+    logActivity(`Catalog refresh failed: ${activityErrorSummary(parsed)}`);
     elements.pluginList.innerHTML = `<div class="empty-state">${parsed.summary}</div>`;
   } finally {
     finishOperation();
@@ -2132,7 +2141,7 @@ async function applyPluginAction(pluginId, action, targetVersion = null) {
   } catch (error) {
     const parsed = parseUiError(error, `Couldn't complete the ${action.replace("-", " ")} action for ${pluginId}.`);
     showAlert(parsed);
-    logActivity(`${pluginId}: ${parsed.summary}`);
+    logActivity(`${pluginId}: ${activityErrorSummary(parsed)}`);
   }
   finally {
     finishOperation();
@@ -2161,7 +2170,7 @@ async function checkForManagerUpdates() {
     }
     if (outcome.error) {
       showAlert(outcome.error);
-      logActivity(`Manager update failed: ${outcome.error.summary}`);
+      logActivity(`Manager update failed: ${activityErrorSummary(outcome.error)}`);
     }
   } finally {
     finishOperation();
@@ -2178,7 +2187,7 @@ async function exportPluginLogs(pluginId) {
   } catch (error) {
     const parsed = parseUiError(error, `Couldn't start diagnostics logs for ${displayName}.`);
     showAlert(parsed);
-    logActivity(`${pluginId}: ${parsed.summary}`);
+    logActivity(`${pluginId}: ${activityErrorSummary(parsed)}`);
     return;
   }
 
@@ -2188,7 +2197,7 @@ async function exportPluginLogs(pluginId) {
   } catch (error) {
     const parsed = parseUiError(error, "Couldn't show the diagnostics instructions.");
     showAlert(parsed);
-    logActivity(`${pluginId}: ${parsed.summary}`);
+    logActivity(`${pluginId}: ${activityErrorSummary(parsed)}`);
     return;
   }
 
@@ -2206,7 +2215,7 @@ async function exportPluginLogs(pluginId) {
   } catch (error) {
     const parsed = parseUiError(error, "Couldn't open the folder picker.");
     showAlert(parsed);
-    logActivity(`${pluginId}: ${parsed.summary}`);
+    logActivity(`${pluginId}: ${activityErrorSummary(parsed)}`);
     return;
   }
 
@@ -2230,7 +2239,7 @@ async function exportPluginLogs(pluginId) {
   } catch (error) {
     const parsed = parseUiError(error, `Couldn't export diagnostics logs for ${pluginId}.`);
     showAlert(parsed);
-    logActivity(`${pluginId}: ${parsed.summary}`);
+    logActivity(`${pluginId}: ${activityErrorSummary(parsed)}`);
   } finally {
     finishOperation();
     setBusy(false);
@@ -2243,7 +2252,7 @@ async function openSupportLink() {
   } catch (error) {
     const parsed = parseUiError(error, "Couldn't open the support link.");
     showAlert(parsed);
-    logActivity(`Support link failed: ${parsed.summary}`);
+    logActivity(`Support link failed: ${activityErrorSummary(parsed)}`);
   }
 }
 
