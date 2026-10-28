@@ -21,6 +21,10 @@ on:
       - "README.md"
       - ".github/workflows/build-plugin-manager.yml"
 
+concurrency:
+  group: plugin-manager-release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   prepare_release:
     runs-on: ubuntu-latest
@@ -28,6 +32,7 @@ jobs:
       contents: write
     outputs:
       app_version: ${{ steps.version.outputs.app_version }}
+      release_tag: ${{ steps.release_guard.outputs.release_tag }}
       should_build: ${{ steps.release_guard.outputs.should_build }}
     steps:
       - uses: actions/checkout@v5
@@ -78,6 +83,7 @@ jobs:
               --raw-field draft=true `
               --raw-field prerelease=false
             $createdRelease = $createdReleaseJson | ConvertFrom-Json
+            "release_tag=$tag" >> $env:GITHUB_OUTPUT
             "should_build=true" >> $env:GITHUB_OUTPUT
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Created draft release shell for $tag."
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
@@ -87,19 +93,16 @@ jobs:
           }
           $releaseUrl = if ($release.html_url) { $release.html_url } else { "https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$tag" }
           $assetCount = @($release.assets).Count
+          "release_tag=$tag" >> $env:GITHUB_OUTPUT
           if ($release.draft) {
-            if ([int]$env:RUN_ATTEMPT -gt 1) {
-              "should_build=true" >> $env:GITHUB_OUTPUT
-              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Reusing existing draft release for $tag on rerun."
-              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
-              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Release URL: $releaseUrl"
-              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Release ID: $($release.id)"
-              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Assets found: $assetCount"
-              Write-Host "Draft release already exists for $tag. Reusing it on rerun."
-              exit 0
-            }
-            "should_build=false" >> $env:GITHUB_OUTPUT
-            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Release build skipped because a draft release for $tag already exists."
+            "should_build=true" >> $env:GITHUB_OUTPUT
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Reusing the draft release for $tag. The final publish job will replace matching assets with the complete platform set."
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Release URL: $releaseUrl"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Release ID: $($release.id)"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Existing assets: $assetCount"
+            Write-Host "Draft release already exists for $tag. Rebuilding all platforms and replacing matching assets."
+            exit 0
           } else {
             "should_build=false" >> $env:GITHUB_OUTPUT
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Release build skipped because $tag is already published."
@@ -117,7 +120,7 @@ jobs:
     needs: prepare_release
     if: needs.prepare_release.outputs.should_build == 'true'
     permissions:
-      contents: write
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -185,27 +188,18 @@ jobs:
         with:
           workspaces: "src-tauri -> target"
 
-      - name: Build and draft release
-        uses: tauri-apps/tauri-action@action-v0.6.0
+      - name: Build platform installer and updater signatures
+        run: npm run tauri:build -- ${{ matrix.args }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           MOAZ_ER_ACCESS_PUBLIC_KEY_BASE64URL: ${{ vars.MOAZ_ER_ACCESS_PUBLIC_KEY_BASE64URL }}
-        with:
-          projectPath: "."
-          tagName: plugin-manager-v__VERSION__
-          releaseName: Moaz Elgabry Plugins v__VERSION__
-          releaseBody: See the release assets for desktop build artifacts.
-          releaseDraft: true
-          prerelease: false
-          args: ${{ matrix.args }}
 
       - name: Upload Windows workflow artifacts
         if: matrix.platform == 'windows-latest'
         uses: actions/upload-artifact@v6
         with:
-          name: moaz-elgabry-plugins-${{ matrix.platform }}
+          name: manager-build-${{ matrix.platform }}
           path: |
             src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/target/release/bundle/nsis/*.exe.sig
@@ -215,7 +209,7 @@ jobs:
         if: matrix.platform == 'macos-latest'
         uses: actions/upload-artifact@v6
         with:
-          name: moaz-elgabry-plugins-${{ matrix.platform }}
+          name: manager-build-${{ matrix.platform }}
           path: |
             src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
             src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz
@@ -226,8 +220,120 @@ jobs:
         if: matrix.platform == 'ubuntu-latest'
         uses: actions/upload-artifact@v6
         with:
-          name: moaz-elgabry-plugins-${{ matrix.platform }}
+          name: manager-build-${{ matrix.platform }}
           path: |
             src-tauri/target/release/bundle/appimage/*.AppImage
             src-tauri/target/release/bundle/appimage/*.AppImage.sig
           if-no-files-found: error
+
+  publish_release:
+    needs:
+      - prepare_release
+      - build
+    if: needs.prepare_release.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: manager-build-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify complete platform asset set
+        env:
+          APP_VERSION: ${{ needs.prepare_release.outputs.app_version }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+
+          function filesUnder(directory) {
+            return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+              const fullPath = path.join(directory, entry.name);
+              return entry.isDirectory() ? filesUnder(fullPath) : [fullPath];
+            });
+          }
+
+          function exactlyOne(files, predicate, label) {
+            const matches = files.filter(predicate);
+            if (matches.length !== 1) {
+              throw new Error(`Expected exactly one ${label}; found ${matches.length}.`);
+            }
+            return matches[0];
+          }
+
+          const files = filesUnder('release-assets');
+          const byName = new Map();
+          for (const file of files) {
+            const name = path.basename(file);
+            if (byName.has(name)) {
+              throw new Error(`Duplicate release asset filename: ${name}`);
+            }
+            byName.set(name, file);
+          }
+          const version = process.env.APP_VERSION;
+          const windows = exactlyOne(files, (file) => path.basename(file) === `Moaz.Elgabry.Plugins_${version}_x64-setup.exe`, 'Windows installer');
+          const linux = exactlyOne(files, (file) => path.basename(file) === `Moaz.Elgabry.Plugins_${version}_amd64.AppImage`, 'Linux AppImage');
+          const macDmg = exactlyOne(files, (file) => path.basename(file) === `Moaz.Elgabry.Plugins_${version}_universal.dmg`, 'macOS DMG');
+          const macUpdater = exactlyOne(files, (file) => path.basename(file) === 'Moaz.Elgabry.Plugins_universal.app.tar.gz', 'macOS updater archive');
+          const required = [
+            path.basename(windows),
+            `${path.basename(windows)}.sig`,
+            path.basename(linux),
+            `${path.basename(linux)}.sig`,
+            path.basename(macDmg),
+            path.basename(macUpdater),
+            `${path.basename(macUpdater)}.sig`
+          ];
+          for (const name of required) {
+            if (!byName.has(name)) {
+              throw new Error(`Required platform asset or signature is missing: ${name}`);
+            }
+            if (fs.statSync(byName.get(name)).size === 0) {
+              throw new Error(`Required platform asset or signature is empty: ${name}`);
+            }
+          }
+          const extras = [...byName.keys()].filter((name) => !required.includes(name));
+          if (extras.length > 0) {
+            throw new Error(`Unexpected files in the release package: ${extras.join(', ')}`);
+          }
+          console.log(`Verified all ${required.length} release assets for version ${version}.`);
+          NODE
+
+      - name: Upload all platforms to the single version draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.prepare_release.outputs.release_tag }}
+          APP_VERSION: ${{ needs.prepare_release.outputs.app_version }}
+        run: |
+          set -euo pipefail
+          release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}")"
+          if [[ "$(jq -r '.draft' <<<"$release_json")" != "true" ]]; then
+            echo "The target release is not a draft; refusing to replace assets."
+            exit 1
+          fi
+          mapfile -d '' assets < <(find release-assets -type f -print0)
+          gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" > release-after-upload.json
+          node <<'NODE'
+          const fs = require('node:fs');
+          const release = JSON.parse(fs.readFileSync('release-after-upload.json', 'utf8'));
+          const names = new Set((release.assets ?? []).map((asset) => asset.name));
+          const version = process.env.APP_VERSION;
+          const required = [
+            `Moaz.Elgabry.Plugins_${version}_x64-setup.exe`,
+            `Moaz.Elgabry.Plugins_${version}_x64-setup.exe.sig`,
+            `Moaz.Elgabry.Plugins_${version}_amd64.AppImage`,
+            `Moaz.Elgabry.Plugins_${version}_amd64.AppImage.sig`,
+            `Moaz.Elgabry.Plugins_${version}_universal.dmg`,
+            'Moaz.Elgabry.Plugins_universal.app.tar.gz',
+            'Moaz.Elgabry.Plugins_universal.app.tar.gz.sig'
+          ];
+          const missing = required.filter((name) => !names.has(name));
+          if (!release.draft || missing.length) {
+            throw new Error(`Release verification failed. Draft=${release.draft}; missing=${missing.join(', ') || 'none'}`);
+          }
+          console.log(`Verified ${required.length} assets on draft ${release.tag_name}.`);
+          NODE
