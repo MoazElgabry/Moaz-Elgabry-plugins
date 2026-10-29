@@ -522,12 +522,9 @@ function parseUiError(error, fallbackSummary = "The operation failed.") {
 }
 
 function activityErrorSummary(parsed) {
-  const reference = parsed.details?.match(/Troubleshooting code: ([^.]+)\./)?.[1]?.trim();
+  const reference = parsed.details?.match(/share reference ([^.]+) with support\./i)?.[1]?.trim();
   if (reference) return `${parsed.summary} [${reference}]`;
-  const fallbackCode = String(parsed.code || "unknown")
-    .replaceAll("_", "-")
-    .toUpperCase();
-  return `${parsed.summary} [PM-${fallbackCode}]`;
+  return parsed.summary;
 }
 
 function showAlert(errorLike, fallbackSummary) {

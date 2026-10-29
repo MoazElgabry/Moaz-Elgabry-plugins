@@ -74,6 +74,7 @@ pub fn write_to_path(path: &Path, marker: &InvitationStatusMarker) -> Result<()>
     result
 }
 
+#[cfg(test)]
 pub fn read(path: &Path) -> InvitationStatus {
     fs::read(path)
         .ok()

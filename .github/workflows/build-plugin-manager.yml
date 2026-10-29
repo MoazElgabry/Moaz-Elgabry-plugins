@@ -156,7 +156,7 @@ jobs:
           cache-dependency-path: "package-lock.json"
 
       - name: Install frontend dependencies
-        run: npm install
+        run: npm ci
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -176,6 +176,10 @@ jobs:
       - name: Install macOS universal Rust targets
         if: matrix.platform == 'macos-latest'
         run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
+
+      - name: Install Rust LLVM tools for macOS binary stripping
+        if: matrix.platform == 'macos-latest'
+        run: rustup component add llvm-tools-preview
 
       - name: Install Linux build dependencies
         if: matrix.platform == 'ubuntu-latest'
@@ -247,7 +251,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v8
         with:
           pattern: manager-build-*
           path: release-assets

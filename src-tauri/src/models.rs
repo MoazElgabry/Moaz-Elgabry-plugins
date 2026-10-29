@@ -319,7 +319,7 @@ impl UiError {
             .join("\nCaused by: ");
         let message = error.to_string();
         let (code, summary) = classify_error(operation, &message, &raw_details);
-        let details = safe_diagnostic_details(code, &raw_details);
+        let details = safe_diagnostic_details(code, &summary, &raw_details);
 
         Self {
             code: code.to_string(),
@@ -339,31 +339,46 @@ impl UiError {
     }
 }
 
-fn safe_diagnostic_details(code: &str, raw_details: &str) -> String {
-    let diagnostic = raw_details
-        .split_whitespace()
-        .filter(|part| {
-            ["PM-", "HTTP-", "SERVER-CODE-", "REQUEST-ID-"]
-                .iter()
-                .any(|prefix| {
-                    part.strip_prefix(prefix).is_some_and(|value| {
-                        !value.is_empty()
-                            && value.bytes().all(|byte| {
-                                byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')
-                            })
-                    })
-                })
-        })
-        .collect::<Vec<_>>();
-    let reference = if diagnostic.is_empty() {
-        format!("PM-{}", code.replace('_', "-").to_ascii_uppercase())
-    } else {
-        diagnostic.join(" ")
-    };
+fn safe_diagnostic_details(code: &str, summary: &str, raw_details: &str) -> String {
+    if matches!(code, "host_running" | "resolve_running" | "insufficient_disk_space") {
+        return String::new();
+    }
 
-    format!(
-        "Troubleshooting code: {reference}. Share this code with support; it contains no invitation key, email address, URL, or local file path."
-    )
+    if contains_sensitive_diagnostic_data(raw_details) {
+        let reference = format!("PM-{}", code.replace('_', "-").to_ascii_uppercase());
+        return format!(
+            "Some technical details are hidden. If you need help, share reference {reference} with support."
+        );
+    }
+
+    let details = raw_details.trim();
+    if details.is_empty() || details == summary {
+        String::new()
+    } else {
+        details.to_string()
+    }
+}
+
+fn contains_sensitive_diagnostic_data(details: &str) -> bool {
+    let lower = details.to_ascii_lowercase();
+    let bytes = details.as_bytes();
+    let has_windows_path = bytes.windows(3).any(|window| {
+        window[0].is_ascii_alphabetic()
+            && window[1] == b':'
+            && matches!(window[2], b'\\' | b'/')
+    });
+
+    has_windows_path
+        || lower.contains("://")
+        || lower.contains('@')
+        || lower.contains("authorization:")
+        || lower.contains("bearer ")
+        || lower.contains("invitation key")
+        || lower.contains("license key")
+        || lower.contains("password=")
+        || lower.contains("token=")
+        || lower.contains("/users/")
+        || lower.contains("/home/")
 }
 
 fn classify_error<'a>(
@@ -507,16 +522,34 @@ fn classify_error<'a>(
     }
 
     if details.contains("Close the running host applications before installing") {
+        let lower = details.to_ascii_lowercase();
+        let summary = if lower.contains("davinci resolve") || lower.contains(": resolve") {
+            "Close DaVinci Resolve before installing or updating this plugin, then try again."
+        } else {
+            "Close the supported host application before installing or updating this plugin, then try again."
+        };
         return (
             "host_running",
-            "Close any running supported host apps before installing or updating this plugin.",
+            summary,
+        );
+    }
+
+    let lower = details.to_ascii_lowercase();
+    if lower.contains("error 112 (0x00000070)")
+        || lower.contains("error 112")
+        || lower.contains("not enough space on the disk")
+        || lower.contains("insufficient disk space")
+    {
+        return (
+            "insufficient_disk_space",
+            "There isn’t enough free space to install this plugin. Free up space on the drive where OFX plugins are installed, then try again.",
         );
     }
 
     if details.contains("Close Resolve before starting a diagnostics session") {
         return (
             "resolve_running",
-            "Close Resolve before starting a diagnostics session.",
+            "Close Resolve before starting the diagnostics session, then try again.",
         );
     }
 
